@@ -1,8 +1,8 @@
 # jambo
 
-jambo is an Go package to build an OpenID Connect provider (server).
+jambo is an Go package to build an OpenID Connect provider (OIDC server).
 
-"Jambo" is also a Swhili word.  It translates to "hello" or "hi".
+"Jambo" is also a Swahili word.  It translates to "hello" or "hi".
 It's a common greeting used in East Africa, particularly
 in Tanzania and Kenya.
 
@@ -45,3 +45,11 @@ The OpenID Connect specification is here:
 
 - `https://openid.net/specs/openid-connect-discovery-1_0.html`
 - `https://openid.net/specs/openid-connect-core-1_0.html`
+
+# Other OpenID Connect providers
+
+- https://github.com/ory/hydra
+- https://github.com/dexidp/dex
+- https://github.com/zitadel/zitadel
+- https://github.com/keycloak/keycloak (written in Java)
+- https://github.com/goauthentik/authentik (Python / Javascript)
