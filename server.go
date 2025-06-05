@@ -24,6 +24,8 @@ func NewServer(issuer, root string) *Server {
 
 	fmt.Printf("config is at %q.\n", root+"/.well-known/openid-configuration")
 	mux.HandleFunc(root+"/.well-known/openid-configuration", s.openIDConfiguration)
+	mux.HandleFunc(root+"/auth", s.openIDAuth)
+	mux.HandleFunc(root+"/token", s.openIDToken)
 	return &s
 }
 

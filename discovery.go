@@ -27,6 +27,7 @@ func (s *Server) openIDConfiguration(w http.ResponseWriter, r *http.Request) {
 	config := openidConfiguration{
 		Issuer:                s.issuer,
 		AuthorizationEndpoint: s.issuer + "/auth",
+		TokenEndpoint:         s.issuer + "/token",
 	}
 
 	b, err := json.Marshal(config)
