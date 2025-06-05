@@ -26,6 +26,7 @@ func NewServer(issuer, root string) *Server {
 	mux.HandleFunc(root+"/.well-known/openid-configuration", s.openIDConfiguration)
 	mux.HandleFunc(root+"/auth", s.openIDAuth)
 	mux.HandleFunc(root+"/token", s.openIDToken)
+	mux.HandleFunc(root+"/keys", s.openIDKeys)
 	return &s
 }
 

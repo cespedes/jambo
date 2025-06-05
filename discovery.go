@@ -11,7 +11,7 @@ type openidConfiguration struct {
 	Issuer                           string   `json:"issuer"`                                // REQUIRED
 	AuthorizationEndpoint            string   `json:"authorization_endpoint"`                // REQUIRED
 	TokenEndpoint                    string   `json:"token_endpoint,omitempty"`              // REQUIRED unless only implicit flow
-	UserinfoEndpoint                 string   `json:"userinfo_endpoint,omitempty"`           // recommended
+	UserInfoEndpoint                 string   `json:"userinfo_endpoint,omitempty"`           // recommended
 	JwksURI                          string   `json:"jwks_uri"`                              // REQUIRED
 	RegistrationEndpoint             string   `json:"registration_endpoint,omitempty"`       // recommended
 	ScopesSupported                  []string `json:"scopes_supported,omitempty"`            // recommended
@@ -21,13 +21,32 @@ type openidConfiguration struct {
 	ACRValuesSupported               []string `json:"acr_values_supported,omitempty"`        // optional
 	SubjectTypesSupported            []string `json:"subject_types_supported"`               // REQUIRED
 	IDTokenSigningAlgValuesSupported []string `json:"id_token_signing_alg_values_supported"` // REQUIRED
+	ClaimsSupported                  []string `json:"claims_supported,omitempty"`            // recommended
+	// missing a lot of "optional" fields
 }
 
 func (s *Server) openIDConfiguration(w http.ResponseWriter, r *http.Request) {
 	config := openidConfiguration{
-		Issuer:                s.issuer,
-		AuthorizationEndpoint: s.issuer + "/auth",
-		TokenEndpoint:         s.issuer + "/token",
+		Issuer:                           s.issuer,
+		AuthorizationEndpoint:            s.issuer + "/auth",
+		TokenEndpoint:                    s.issuer + "/token",
+		UserInfoEndpoint:                 s.issuer + "/userinfo",
+		JwksURI:                          s.issuer + "/keys",
+		ScopesSupported:                  []string{"openid", "email", "profile", "groups"},
+		ResponseTypesSupported:           []string{"code"},
+		SubjectTypesSupported:            []string{"public"},
+		IDTokenSigningAlgValuesSupported: []string{"RS256"},
+		ClaimsSupported: []string{
+			"iss",                // Issuer.
+			"sub",                // Subject.
+			"aud",                // Audience.
+			"jti",                // JWT ID.  A unique identifier for the token.
+			"exp",                // Expiration time after which the JWT MUST NOT be accepted for processing.
+			"iat",                // Time at which the JWT was issued.
+			"name",               // Full name
+			"email",              // Preferred e-mail address
+			"preferred_username", // Shorthand name by which the End-User wishes to be referred to.
+		},
 	}
 
 	b, err := json.Marshal(config)
@@ -36,57 +55,4 @@ func (s *Server) openIDConfiguration(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintln(w, string(b))
 	return
-
-	fmt.Fprintf(w, `{
-  "issuer": "%s",
-  "authorization_endpoint": "%s/auth",
-  "token_endpoint": "%s/token",
-  "jwks_uri": "%s/keys",
-  "userinfo_endpoint": "%s/userinfo",
-  "device_authorization_endpoint": "%s/device/code",
-  "end_session_endpoint": "%s",
-  "grant_types_supported": [
-    "authorization_code",
-    "refresh_token",
-    "urn:ietf:params:oauth:grant-type:device_code",
-    "urn:ietf:params:oauth:grant-type:token-exchange"
-  ],
-  "response_types_supported": [
-    "code"
-  ],
-  "subject_types_supported": [
-    "public"
-  ],
-  "id_token_signing_alg_values_supported": [
-    "RS256"
-  ],
-  "code_challenge_methods_supported": [
-    "S256",
-    "plain"
-  ],
-  "scopes_supported": [
-    "openid",
-    "email",
-    "groups",
-    "profile",
-    "offline_access"
-  ],
-  "token_endpoint_auth_methods_supported": [
-    "client_secret_basic",
-    "client_secret_post"
-  ],
-  "claims_supported": [
-    "iss",
-    "sub",
-    "aud",
-    "iat",
-    "exp",
-    "email",
-    "email_verified",
-    "locale",
-    "name",
-    "preferred_username",
-    "at_hash"
-  ]
-}`, s.issuer, s.issuer, s.issuer, s.issuer, s.issuer, s.issuer, s.issuer)
 }
