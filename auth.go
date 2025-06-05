@@ -12,12 +12,6 @@ import (
 func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 	var err error
 
-	err = r.ParseForm()
-	if err != nil {
-		fmt.Printf("%s: %s: ParseForm: %v\n", r.RemoteAddr, r.URL, err)
-		return
-	}
-
 	// OpenID Connect requests MUST contain the openid scope value
 	scopes := strings.Fields(r.FormValue("scope"))
 	if !slices.Contains(scopes, "openid") {

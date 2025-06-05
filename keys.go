@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -40,6 +41,6 @@ func (s *Server) openIDKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-	w.Write(data)
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)+1))
+	fmt.Fprintln(w, string(data))
 }

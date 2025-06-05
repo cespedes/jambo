@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 )
 
 type openidConfiguration struct {
@@ -34,6 +35,7 @@ func (s *Server) openIDConfiguration(w http.ResponseWriter, r *http.Request) {
 		JwksURI:                          s.issuer + "/keys",
 		ScopesSupported:                  []string{"openid", "email", "profile", "groups"},
 		ResponseTypesSupported:           []string{"code"},
+		GrantTypesSupported:              []string{"authorization_code"},
 		SubjectTypesSupported:            []string{"public"},
 		IDTokenSigningAlgValuesSupported: []string{"RS256"},
 		ClaimsSupported: []string{
@@ -49,10 +51,11 @@ func (s *Server) openIDConfiguration(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	b, err := json.Marshal(config)
+	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Fprintln(w, string(b))
-	return
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)+1))
+	fmt.Fprintln(w, string(data))
 }
