@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+
+	"github.com/go-jose/go-jose/v4"
 )
 
 func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
@@ -25,8 +27,18 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("code=%q redirect_uri=%q client_id=%q client_secret=%q\n",
 		code, redirectURI, clientID, clientSecret)
 
+	idToken, err := s.getIDToken()
+	if err != nil {
+		http.Error(w, "Internal server error getting ID token.", http.StatusInternalServerError)
+		return
+	}
 	response := map[string]string{
-		"access_token": "foobar",
+		"access_token": "foo",
+		"token_type":   "Bearer",
+		"id_token":     idToken,
+		// "expires_in": // optional
+		// "refresh_token": // optional
+		// "scope": // optional
 	}
 
 	data, err := json.MarshalIndent(response, "", "  ")
@@ -36,5 +48,31 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)+1))
+
+	// RFC6749 section 5.1:
+	// The authorization server MUST include the HTTP "Cache-Control"
+	// response header field [RFC2616] with a value of "no-store" in any
+	// response containing tokens, credentials, or other sensitive
+	// information, as well as the "Pragma" response header field [RFC2616]
+	// with a value of "no-cache"
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+
 	fmt.Fprintln(w, string(data))
+	fmt.Println("=======")
+	fmt.Println(string(data))
+}
+
+func (s *Server) getIDToken() (jws string, err error) {
+	signingKey := jose.SigningKey{Key: s.key, Algorithm: jose.RS256}
+
+	signer, err := jose.NewSigner(signingKey, &jose.SignerOptions{})
+	if err != nil {
+		return "", fmt.Errorf("new signer: %v", err)
+	}
+	signature, err := signer.Sign([]byte("foobar"))
+	if err != nil {
+		return "", fmt.Errorf("signing payload: %v", err)
+	}
+	return signature.CompactSerialize()
 }
