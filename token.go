@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-jose/go-jose/v4"
 )
@@ -63,6 +64,16 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	fmt.Println(string(data))
 }
 
+// https://openid.net/specs/openid-connect-core-1_0.html#rfc.section.2
+// TODO: add support for "nonce"
+type IDToken struct {
+	Issuer            string `json:"iss"`
+	SubjectIdentifier string `json:"sub"`
+	Audience          string `json:"aud"`
+	Expiration        int64  `json:"exp"`
+	IssuedAt          int64  `json:"iat"`
+}
+
 func (s *Server) getIDToken() (jws string, err error) {
 	signingKey := jose.SigningKey{Key: s.key, Algorithm: jose.RS256}
 
@@ -70,7 +81,20 @@ func (s *Server) getIDToken() (jws string, err error) {
 	if err != nil {
 		return "", fmt.Errorf("new signer: %v", err)
 	}
-	signature, err := signer.Sign([]byte("foobar"))
+
+	idToken := IDToken{
+		Issuer:            s.issuer,
+		SubjectIdentifier: "example-app",
+		Audience:          "example-app",
+		Expiration:        time.Now().Unix() + 3600, // expires in 1 hour
+		IssuedAt:          time.Now().Unix(),
+	}
+	b, err := json.Marshal(idToken)
+	if err != nil {
+		return "", err
+	}
+
+	signature, err := signer.Sign(b)
 	if err != nil {
 		return "", fmt.Errorf("signing payload: %v", err)
 	}
