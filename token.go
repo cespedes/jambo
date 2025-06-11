@@ -17,13 +17,9 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	code := r.PostFormValue("code")
-	_ = code
 	redirectURI := r.PostFormValue("redirect_uri")
-	_ = redirectURI
 	clientID := r.PostFormValue("client_id")
-	_ = clientID
 	clientSecret := r.PostFormValue("client_secret")
-	_ = clientSecret
 
 	fmt.Printf("code=%q redirect_uri=%q client_id=%q client_secret=%q\n",
 		code, redirectURI, clientID, clientSecret)

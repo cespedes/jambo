@@ -31,23 +31,23 @@ func (s *Server) openIDConfiguration(w http.ResponseWriter, r *http.Request) {
 		Issuer:                           s.issuer,
 		AuthorizationEndpoint:            s.issuer + "/auth",
 		TokenEndpoint:                    s.issuer + "/token",
-		UserInfoEndpoint:                 s.issuer + "/userinfo",
 		JwksURI:                          s.issuer + "/keys",
 		ScopesSupported:                  []string{"openid", "email", "profile", "groups"},
 		ResponseTypesSupported:           []string{"code"},
 		GrantTypesSupported:              []string{"authorization_code"},
 		SubjectTypesSupported:            []string{"public"},
 		IDTokenSigningAlgValuesSupported: []string{"RS256"},
+		// UserInfoEndpoint:                 s.issuer + "/userinfo", // TODO: not implemented
 		ClaimsSupported: []string{
 			"iss",                // Issuer.
 			"sub",                // Subject.
 			"aud",                // Audience.
-			"jti",                // JWT ID.  A unique identifier for the token.
 			"exp",                // Expiration time after which the JWT MUST NOT be accepted for processing.
 			"iat",                // Time at which the JWT was issued.
 			"name",               // Full name
 			"email",              // Preferred e-mail address
 			"preferred_username", // Shorthand name by which the End-User wishes to be referred to.
+			// "jti",                // JWT ID.  A unique identifier for the token.
 		},
 	}
 

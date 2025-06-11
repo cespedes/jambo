@@ -53,3 +53,16 @@ The OpenID Connect specification is here:
 - https://github.com/zitadel/zitadel
 - https://github.com/keycloak/keycloak (written in Java)
 - https://github.com/goauthentik/authentik (Python / Javascript)
+
+# 2FA workflow
+
+- User goes to (client-end-point)
+- (client-end-point) redirects user to (issuer)/auth
+- In that page, it asks for user and password
+- jambo calls authenticate(user, password)
+- If password is incorrect, inform and try again
+- If password is correct and 2FA is not needed, authenticate and redirect to (client-callback)
+- If password is correct and 2FA is needed, show 2FA options and let the user choose 1
+- After choosing one, do some things (like sending an SMS)
+  and ask for additional info (secret sent via SMS)
+- If secret is correct, authenticate and proceed to (client-callback)

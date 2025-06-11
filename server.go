@@ -19,6 +19,8 @@ type Server struct {
 
 	key     jose.JSONWebKey
 	allKeys jose.JSONWebKeySet
+
+	authenticator func(string, string) bool
 }
 
 func NewServer(issuer, root string) *Server {
@@ -80,4 +82,8 @@ func (s *Server) createKey() error {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
+}
+
+func (s *Server) SetAuthenticator(f func(string, string) bool) {
+	s.authenticator = f
 }

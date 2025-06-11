@@ -11,6 +11,7 @@ const (
 
 type Result struct {
 	Type     ResultType
+	Claims   map[string]string
 	question string
 	values   []string
 	callback func(string) Result

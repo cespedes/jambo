@@ -40,14 +40,15 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Client ID: %q\n", clientID)
 	fmt.Fprintf(w, "Redirect URI: %q\n", redirectURI)
 	fmt.Fprintf(w, "State: %q\n", state)
-	fmt.Fprintf(w, "Random Code: %q\n", rand.Text())
+	code := rand.Text()
+	fmt.Fprintf(w, "Random Code: %q\n", code)
 	u, err := url.Parse(redirectURI)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("redirect_uri: %v", err.Error), http.StatusBadRequest)
 		return
 	}
 	q := u.Query()
-	q.Set("code", rand.Text())
+	q.Set("code", code)
 	q.Set("state", state)
 	u.RawQuery = q.Encode()
 	fmt.Fprintf(w, "<a href=\"%s\">click me</a>\n", u)
