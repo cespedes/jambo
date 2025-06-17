@@ -15,13 +15,13 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 	// OpenID Connect requests MUST contain the openid scope value
 	scopes := strings.Fields(r.FormValue("scope"))
 	if !slices.Contains(scopes, "openid") {
-		http.Error(w, "`openid` scope not specidied", http.StatusBadRequest)
+		s.template("error", w, map[string]string{"error": "`openid` scope not specidied"})
 		return
 	}
 
 	// we only support response_type = "code"
 	if r.FormValue("response_type") != "code" {
-		http.Error(w, "`response_type` must be `code`", http.StatusBadRequest)
+		s.template("error", w, map[string]string{"error": "`response_type` must be `code`"})
 		return
 	}
 

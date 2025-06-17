@@ -27,15 +27,16 @@ func run(args []string) error {
 	listenAddr := ":7480"
 	s := jambo.NewServer(issuer, root)
 
-	/*
-		clientID := "test-client"
-		clientSecret := "client-secret"
-		s.AddClient(clientID, clientSecret)
+	clientID := "test-client"
+	clientSecret := "client-secret"
+	s.AddClient(clientID, clientSecret, nil)
 
-		s.SetAuthenticator(func(user, pass string) bool {
-			return user == "admin" && pass == "secret"
-		})
-	*/
+	s.SetAuthenticator(func(req *jambo.Request) jambo.Response {
+		if req.User == "admin" && req.Password == "secret" {
+			return jambo.Response{Type: jambo.ResponseTypeLoginOK}
+		}
+		return jambo.Response{Type: jambo.ResponseTypeLoginFailed}
+	})
 
 	log.Printf("issuer=%q root=%q listenAddr=%q\n", issuer, root, listenAddr)
 	return http.ListenAndServe(listenAddr, s)

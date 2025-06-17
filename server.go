@@ -23,6 +23,12 @@ var webStatic embed.FS
 //go:embed web/templates
 var webTemplates embed.FS
 
+type Client struct {
+	ID           string
+	Secret       string
+	RedirectURIs []string
+}
+
 type Server struct {
 	root    string
 	issuer  string
@@ -32,7 +38,9 @@ type Server struct {
 	key     jose.JSONWebKey
 	allKeys jose.JSONWebKeySet
 
-	authenticator func(string, string) bool
+	authenticator func(*Request) Response
+
+	clients []Client
 }
 
 func NewServer(issuer, root string) *Server {
@@ -57,8 +65,8 @@ func NewServer(issuer, root string) *Server {
 	})
 
 	s.routes()
-	fmt.Printf("Server ready at %s (root path is %s).\n", issuer, root)
 
+	fmt.Printf("Server ready at %s (root path is %s).\n", issuer, root)
 	return &s
 }
 
@@ -143,6 +151,16 @@ func (s *Server) createKey() error {
 	return nil
 }
 
-func (s *Server) SetAuthenticator(f func(string, string) bool) {
+func (s *Server) SetAuthenticator(f func(req *Request) Response) {
 	s.authenticator = f
+}
+
+// AddClient adds a new client to the server.
+// It cannot be used concurrently with any other access to Server.
+func (s *Server) AddClient(clientID, clientSecret string, redirectURIs []string) {
+	s.clients = append(s.clients, Client{
+		ID:           clientID,
+		Secret:       clientSecret,
+		RedirectURIs: redirectURIs,
+	})
 }

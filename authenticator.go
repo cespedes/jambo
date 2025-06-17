@@ -1,43 +1,33 @@
 package jambo
 
-type ResultType int
+type RequestType int
 
 const (
-	ResultTypeOK     ResultType = iota // login is successful
-	ResultTypeFailed                   // login failed
-	ResultTypeAsk                      // login is successful so far, but we need more info
-	ResultTypeChoose                   // login is successful so far, but we need more info
+	RequestTypeInvalid      ResponseType = iota
+	RequestTypeUserPassword              // regular authentication: user and password
+	RequestTypeSendOTP                   // client is requesting OTP to be sent to their devices
+	RequestTypeOTP                       // client has just sent the OTP to be checked
 )
 
-type Result struct {
-	Type     ResultType
-	Claims   map[string]string
-	question string
-	values   []string
-	callback func(string) Result
+type Request struct {
+	Type     RequestType
+	Client   string
+	User     string
+	Password string
+	MFAType  string
+	OTPValue string
 }
 
-var ResultLoginOK = Result{
-	Type: ResultTypeOK,
-}
+type ResponseType int
 
-var ResultLoginFailed = Result{
-	Type: ResultTypeFailed,
-}
+const (
+	ResponseTypeInvalid     ResponseType = iota
+	ResponseTypeOK                       // No errors
+	ResponseTypeLoginOK                  // login is successful
+	ResponseTypeLoginFailed              // login failed
+	ResponseType2FANeeded                // login is successful so far, but we need 2FA
+)
 
-func ResultLoginChoose(question string, values []string, callback func(string) Result) Result {
-	return Result{
-		Type:     ResultTypeChoose,
-		question: question,
-		values:   values,
-		callback: callback,
-	}
-}
-
-func ResultLoginAsk(question string, callback func(string) Result) Result {
-	return Result{
-		Type:     ResultTypeAsk,
-		question: question,
-		callback: callback,
-	}
+type Response struct {
+	Type ResponseType
 }
