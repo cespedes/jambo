@@ -1,16 +1,19 @@
 package jambo
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"embed"
 	_ "embed"
 	"encoding/hex"
 	"fmt"
+	"html/template"
 	"io"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -18,10 +21,10 @@ import (
 )
 
 //go:embed web/static
-var webStatic embed.FS
+var _webStatic embed.FS
 
 //go:embed web/templates
-var webTemplates embed.FS
+var _webTemplates embed.FS
 
 type Client struct {
 	ID           string
@@ -40,7 +43,9 @@ type Server struct {
 
 	authenticator func(*Request) Response
 
-	clients []Client
+	webStatic    fs.FS
+	webTemplates *template.Template
+	clients      []Client
 }
 
 func NewServer(issuer, root string) *Server {
@@ -55,10 +60,25 @@ func NewServer(issuer, root string) *Server {
 		log.Fatal(err)
 	}
 
-	err = fs.WalkDir(webStatic, ".", fs.WalkDirFunc(func(path string, d fs.DirEntry, err error) error {
-		fmt.Printf("path=%s d=%v err=%v\n", path, d, err)
+	s.webStatic = _webStatic
+
+	// fmt.Println("# Static files")
+	// err = fs.WalkDir(s.webStatic, ".", fs.WalkDirFunc(func(path string, d fs.DirEntry, err error) error {
+	// 	fmt.Printf("%v\n", d)
+	// 	return nil
+	// }))
+
+	s.webTemplates, err = template.ParseFS(_webTemplates, "web/templates/*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 		return nil
-	}))
+	}
+
+	// fmt.Println("# Templates")
+	// for _, t := range s.webTemplates.Templates() {
+	// 	fmt.Printf("- %s\n", t.Name())
+	// }
+
 	s.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("%s %s %v\n", r.Method, r.URL, r)
 		s.mux.ServeHTTP(w, r)
@@ -78,7 +98,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/keys", s.openIDKeys)
 
 	// All the files and dirs inside "web/static" will be served as-is:
-	if fsys, err := fs.Sub(webStatic, "web/static"); err == nil {
+	if fsys, err := fs.Sub(s.webStatic, "web/static"); err == nil {
 		// s.mux.Handle("/", http.FileServerFS(fsys))
 		s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			// no need to worry about ".." in path because we are looking inside a fs.FS
@@ -163,4 +183,15 @@ func (s *Server) AddClient(clientID, clientSecret string, redirectURIs []string)
 		Secret:       clientSecret,
 		RedirectURIs: redirectURIs,
 	})
+}
+
+type contextClient struct{}
+
+func (s *Server) SetClient(r *http.Request, client *Client) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), contextClient{}, client))
+}
+
+func (s *Server) GetClient(r *http.Request) *Client {
+	c, _ := r.Context().Value(contextClient{}).(*Client)
+	return c
 }

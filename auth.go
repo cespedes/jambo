@@ -12,20 +12,50 @@ import (
 func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 	var err error
 
+	clientID := r.FormValue("client_id")
+	if clientID == "" {
+		s.template(w, r, "error.html", map[string]string{
+			"ErrorType": `Bad request`,
+			"Error":     `Missing required field "client_id"`,
+		})
+		return
+	}
+
+	var client Client
+	for _, c := range s.clients {
+		if c.ID == clientID {
+			client = c
+			break
+		}
+	}
+	if client.ID == "" {
+		s.template(w, r, "error.html", map[string]string{
+			"Error": fmt.Sprintf(`unknown client "%s"`, clientID),
+		})
+		return
+	}
+	r = s.SetClient(r, &client)
+
 	// OpenID Connect requests MUST contain the openid scope value
 	scopes := strings.Fields(r.FormValue("scope"))
 	if !slices.Contains(scopes, "openid") {
-		s.template("error", w, map[string]string{"error": "`openid` scope not specidied"})
+		s.template(w, r, "error.html", map[string]string{
+			"ErrorType": "Bad request",
+			"Error":     `Missing required scope: "openid"`,
+		})
 		return
 	}
 
 	// we only support response_type = "code"
 	if r.FormValue("response_type") != "code" {
-		s.template("error", w, map[string]string{"error": "`response_type` must be `code`"})
+		s.template(w, r, "error.html", map[string]string{
+			"Error": `Field "response_type" must be "code"`,
+		})
 		return
 	}
 
-	clientID := r.FormValue("client_id")
+	// TODO: check redirect_uri
+
 	redirectURI := r.FormValue("redirect_uri")
 	state := r.FormValue("state")
 

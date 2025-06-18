@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>{{ .Issuer }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="{{ .Root }}/css/jambo.css" rel="stylesheet">
+  <link rel="icon" href="{{ .Root }}/img/favicon.png">
+</head>
+
+<body>
+  <div class="jambo">
+    <div class="logos">
+	    <a href="https://github.com/cespedes/jambo"><img class="logo" src="{{ .Root }}/img/jambo.png"></a>
+{{- with .Client }}
+      <!-- img class="logo" src="{{ printf "/img/logo-%s.png" . }}" -->
+{{- end }}
+    </div>
