@@ -29,7 +29,7 @@ func run(args []string) error {
 
 	clientID := "test-client"
 	clientSecret := "client-secret"
-	s.AddClient(clientID, clientSecret, nil)
+	s.AddClient(clientID, clientSecret, []string{"http://127.0.0.1:5555/callback"})
 
 	s.SetAuthenticator(func(req *jambo.Request) jambo.Response {
 		if req.User == "admin" && req.Password == "secret" {

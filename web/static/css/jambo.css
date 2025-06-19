@@ -1,0 +1,44 @@
+* {
+	box-sizing: border-box;
+}
+
+html {
+	height: 100%;
+}
+
+body {
+	background: #2A7B9B;
+	background: radial-gradient(circle,rgba(42, 123, 155, 1) 0%, rgba(87, 199, 133, 1) 50%, rgba(237, 221, 83, 1) 100%);
+	background-repeat: no-repeat;
+	background-position: center;
+	background-size: cover;
+	background-attachment: fixed;
+}
+
+h1, h2, h3 {
+	margin-top: 0;
+}
+
+.jambo {
+	width: 500px;
+	margin: 20px auto;
+	text-align: center;
+	color: #333;
+	font-family: 'Source Sans Pro', Helvetica, sans-serif;
+}
+
+.jambo > div {
+	background-color: rgba(255,255,255,0.8);
+	margin: 20px auto;
+}
+
+.panel {
+	padding: 30px;
+}
+
+.logo {
+	width: 245px;
+	max-height: 150px;
+	vertical-align: middle;
+	padding: 10px;
+}

@@ -54,9 +54,14 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: check redirect_uri
-
 	redirectURI := r.FormValue("redirect_uri")
+	if !slices.Contains(client.RedirectURIs, redirectURI) {
+		s.template(w, r, "error.html", map[string]string{
+			"Error": fmt.Sprintf(`Unregistered redirect_uri ("%s")`, redirectURI),
+		})
+		return
+	}
+
 	state := r.FormValue("state")
 
 	fmt.Fprintln(w, `<!DOCTYPE html>

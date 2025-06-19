@@ -1,5 +1,5 @@
 {{ template "header.html" . }}
-	<div>
+	<div class="panel">
 		<h1 style="color: red">{{ if .ErrorType }}{{ .ErrorType }}{{ else }}Error{{ end }}</h1>
 		<p>{{ .Error }}</p>
 	</div>
