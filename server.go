@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/go-jose/go-jose/v4"
 )
@@ -32,6 +33,13 @@ type Client struct {
 	RedirectURIs []string
 }
 
+type Connection struct {
+	code        string
+	client      *Client
+	redirectURI string
+	state       string
+}
+
 type Server struct {
 	root    string
 	issuer  string
@@ -46,6 +54,10 @@ type Server struct {
 	webStatic    fs.FS
 	webTemplates *template.Template
 	clients      []Client
+
+	sync.Mutex
+
+	connections []Connection
 }
 
 func NewServer(issuer, root string) *Server {
@@ -94,6 +106,7 @@ func (s *Server) routes() {
 	s.mux = http.NewServeMux()
 	s.mux.HandleFunc("/.well-known/openid-configuration", s.openIDConfiguration)
 	s.mux.HandleFunc("/auth", s.openIDAuth)
+	s.mux.HandleFunc("/auth/login", s.openIDAuthLogin)
 	s.mux.HandleFunc("/token", s.openIDToken)
 	s.mux.HandleFunc("/keys", s.openIDKeys)
 

@@ -4,14 +4,12 @@ import (
 	"crypto/rand"
 	"fmt"
 	"net/http"
-	"net/url"
+	"path/filepath"
 	"slices"
 	"strings"
 )
 
 func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
-	var err error
-
 	clientID := r.FormValue("client_id")
 	if clientID == "" {
 		s.template(w, r, "error.html", map[string]string{
@@ -21,20 +19,20 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var client Client
+	var client *Client
 	for _, c := range s.clients {
 		if c.ID == clientID {
-			client = c
+			client = &c
 			break
 		}
 	}
-	if client.ID == "" {
+	if client == nil {
 		s.template(w, r, "error.html", map[string]string{
 			"Error": fmt.Sprintf(`unknown client "%s"`, clientID),
 		})
 		return
 	}
-	r = s.SetClient(r, &client)
+	r = s.SetClient(r, client)
 
 	// OpenID Connect requests MUST contain the openid scope value
 	scopes := strings.Fields(r.FormValue("scope"))
@@ -63,31 +61,57 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	state := r.FormValue("state")
-
-	fmt.Fprintln(w, `<!DOCTYPE html>
-<html>
-	<head>
-		<title>OpenID Authentication</title>
-	</head>
-	<body>
-		<pre>`)
-	fmt.Fprintln(w, "<pre>")
-	fmt.Fprintf(w, "Client ID: %q\n", clientID)
-	fmt.Fprintf(w, "Redirect URI: %q\n", redirectURI)
-	fmt.Fprintf(w, "State: %q\n", state)
 	code := rand.Text()
-	fmt.Fprintf(w, "Random Code: %q\n", code)
-	u, err := url.Parse(redirectURI)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("redirect_uri: %v", err.Error), http.StatusBadRequest)
+
+	conn := Connection{
+		code:        code,
+		client:      client,
+		redirectURI: redirectURI,
+		state:       state,
+	}
+	s.Lock()
+	s.connections = append(s.connections, conn)
+	s.Unlock()
+
+	s.template(w, r, "login.html", map[string]string{
+		"PostURL": filepath.Join(s.root, "/auth/login"),
+		"code":    code,
+		"state":   state,
+	})
+}
+
+func (s *Server) openIDAuthLogin(w http.ResponseWriter, r *http.Request) {
+	login := r.FormValue("login")
+	password := r.FormValue("password")
+	code := r.FormValue("code")
+
+	var conn Connection
+
+	s.Lock()
+	for i := range s.connections {
+		if code == s.connections[i].code {
+			conn = s.connections[i]
+		}
+	}
+	s.Unlock()
+
+	if conn == (Connection{}) {
+		s.template(w, r, "error.html", map[string]string{
+			"ErrorType": "Bad request",
+			"Error":     fmt.Sprintf(`Invalid code %q from request`, code),
+		})
 		return
 	}
-	q := u.Query()
-	q.Set("code", code)
-	q.Set("state", state)
-	u.RawQuery = q.Encode()
-	fmt.Fprintf(w, "<a href=\"%s\">click me</a>\n", u)
-	fmt.Fprintln(w, `</pre>
-	</body>
-</html>`)
+
+	if login == "admin" && password == "secret" {
+		fmt.Fprintf(w, "login=%q password=%q conn=%v\n", login, password, conn)
+		return
+	}
+
+	s.template(w, r, "login.html", map[string]string{
+		"PostURL": filepath.Join(s.root, "/auth/login"),
+		"code":    code,
+		"state":   conn.state,
+		"Invalid": "true",
+	})
 }

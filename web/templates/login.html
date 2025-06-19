@@ -1,13 +1,15 @@
 {{ template "header.html" . }}
-
-    <div class="panel">
+{{ $UsernamePrompt := "User ID" }}
+{{- if .UsernamePrompt }}{{ $UsernamePrompt = .UsernamePrompt }}{{ end }}
+    <div class="panel login">
       <h2 class="heading">Log in to Your Account</h2>
       <form method="post" action="{{ .PostURL }}">
         <div class="form-row">
           <div class="form-label">
-            <label for="userid">{{ .UsernamePrompt }}</label>
+            <label for="userid">{{ $UsernamePrompt }}</label>
           </div>
-    	  <input tabindex="1" required id="login" name="login" type="text" class="form-input" placeholder="{{ .UsernamePrompt }}" {{ if .Username }} value="{{ .Username }}" {{ else }} autofocus {{ end }}/>
+	  <input type="hidden" name="code" value="{{ .code }}">
+    	  <input tabindex="1" required id="login" name="login" type="text" class="form-input" placeholder="{{ $UsernamePrompt }}" {{ if .Username }} value="{{ .Username }}" {{ else }} autofocus {{ end }}/>
         </div>
         <div class="form-row">
           <div class="form-label">
@@ -18,18 +20,12 @@
     
         {{ if .Invalid }}
           <div id="login-error" class="error-box">
-            Invalid {{ .UsernamePrompt }} and password.
+            Invalid {{ $UsernamePrompt }} and password.
           </div>
         {{ end }}
     
-        <button tabindex="3" id="submit-login" type="submit" class="btn btn-primary">Login</button>
+        <button tabindex="3" id="submit-login" type="submit">Login</button>
     
       </form>
-      {{ if .BackLink }}
-      <div class="link-back">
-        <a class="subtle-text" href="{{ .BackLink }}">Select another login method.</a>
-      </div>
-      {{ end }}
     </div>
-
-{{ template "footer.html" . }}
+{{- template "footer.html" . }}
