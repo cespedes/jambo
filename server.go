@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cespedes/jambo/mergefs"
 	"github.com/go-jose/go-jose/v4"
 )
 
@@ -72,7 +73,10 @@ func NewServer(issuer, root string) *Server {
 		log.Fatal(err)
 	}
 
-	s.webStatic = _webStatic
+	if s.webStatic, err = fs.Sub(_webStatic, "web/static"); err != nil {
+		// This should never return an error
+		log.Fatal(err)
+	}
 
 	// fmt.Println("# Static files")
 	// err = fs.WalkDir(s.webStatic, ".", fs.WalkDirFunc(func(path string, d fs.DirEntry, err error) error {
@@ -110,41 +114,41 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/token", s.openIDToken)
 	s.mux.HandleFunc("/keys", s.openIDKeys)
 
-	// All the files and dirs inside "web/static" will be served as-is:
-	if fsys, err := fs.Sub(s.webStatic, "web/static"); err == nil {
-		// s.mux.Handle("/", http.FileServerFS(fsys))
-		s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			// no need to worry about ".." in path because we are looking inside a fs.FS
-			path := strings.Trim(r.URL.Path, "/")
-			if path == "" {
-				path = "."
-			}
-			f, err := fsys.Open(path)
-			if err != nil {
+	// All the files and dirs inside s.webStatic will be served as-is:
+	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// no need to worry about ".." in path because we are looking inside a fs.FS
+		path := strings.Trim(r.URL.Path, "/")
+		if path == "" {
+			path = "."
+		}
+		f, err := s.webStatic.Open(path)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		defer f.Close()
+		fi, err := f.Stat()
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if fi.IsDir() {
+			index := filepath.Join(path, "index.html")
+			f.Close()
+			if f, err = s.webStatic.Open(index); err != nil {
 				http.NotFound(w, r)
 				return
 			}
-			defer f.Close()
-			fi, err := f.Stat()
-			if err != nil {
+			if fi, err = f.Stat(); err != nil || fi.IsDir() {
 				http.NotFound(w, r)
-				return
 			}
-			if fi.IsDir() {
-				index := filepath.Join(path, "index.html")
-				f.Close()
-				if f, err = fsys.Open(index); err != nil {
-					http.NotFound(w, r)
-					return
-				}
-				if fi, err = f.Stat(); err != nil || fi.IsDir() {
-					http.NotFound(w, r)
-				}
-			}
-			http.ServeContent(w, r, fi.Name(), fi.ModTime(), f.(io.ReadSeeker))
-		})
-	}
+		}
+		http.ServeContent(w, r, fi.Name(), fi.ModTime(), f.(io.ReadSeeker))
+	})
+}
 
+func (s *Server) AddStaticFS(filesystem fs.FS) {
+	s.webStatic = mergefs.Merge(s.webStatic, filesystem)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
