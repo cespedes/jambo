@@ -3,6 +3,7 @@ package jambo
 import (
 	"crypto/rand"
 	"fmt"
+	"log"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -103,6 +104,20 @@ func (s *Server) openIDAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req := Request{
+		Type:     RequestTypeUserPassword,
+		Client:   conn.client.ID,
+		User:     login,
+		Password: password,
+	}
+	log.Println("jambo: calling callback")
+	resp := s.callback(&req)
+
+	if resp.Type == ResponseTypeLoginOK {
+		http.Redirect(w, r, conn.redirectURI, http.StatusFound)
+		return
+
+	}
 	if login == "admin" && password == "secret" {
 		fmt.Fprintf(w, "login=%q password=%q conn=%v\n", login, password, conn)
 		return

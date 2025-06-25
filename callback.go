@@ -3,10 +3,10 @@ package jambo
 type RequestType int
 
 const (
-	RequestTypeInvalid      ResponseType = iota
-	RequestTypeUserPassword              // regular authentication: user and password
-	RequestTypeSendOTP                   // client is requesting OTP to be sent to their devices
-	RequestTypeOTP                       // client has just sent the OTP to be checked
+	RequestTypeInvalid      RequestType = iota
+	RequestTypeUserPassword             // regular authentication: user and password
+	RequestTypeSendOTP                  // client is requesting OTP to be sent to their devices
+	RequestTypeOTP                      // client has just sent the OTP to be checked
 )
 
 type Request struct {

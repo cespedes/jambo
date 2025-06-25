@@ -50,7 +50,7 @@ type Server struct {
 	key     jose.JSONWebKey
 	allKeys jose.JSONWebKeySet
 
-	authenticator func(*Request) Response
+	callback func(*Request) Response
 
 	webStatic    fs.FS
 	webTemplates *template.Template
@@ -188,8 +188,8 @@ func (s *Server) createKey() error {
 	return nil
 }
 
-func (s *Server) SetAuthenticator(f func(req *Request) Response) {
-	s.authenticator = f
+func (s *Server) SetCallback(f func(req *Request) Response) {
+	s.callback = f
 }
 
 // AddClient adds a new client to the server.
