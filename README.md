@@ -28,8 +28,11 @@ func main() {
 	clientSecret := "client-secret"
 	s.AddClient(clientID, clientSecret)
 
-	s.SetAuthenticator(func (user, pass string) bool {
-		return user=="admin" && pass=="secret"
+	s.SetCallback(func (user, pass string) bool {
+		if req.User == "admin" && req.Password == "secret" {
+			return jambo.Response{Type: jambo.ResponseTypeLoginOK}
+		}
+		return jambo.Response{Type: jambo.ResponseTypeLoginFailed}
 	})
 
 	http.ListenAndServe(":8080", s)

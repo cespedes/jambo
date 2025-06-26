@@ -3,6 +3,7 @@ package jambo
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,18 +14,51 @@ import (
 func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	grantType := r.PostFormValue("grant_type")
 	if grantType != "authorization_code" {
-		fmt.Printf("error in token endpoint: grant_type=%q\n", grantType)
+		fmt.Fprintln(w, `{"error":"unsupported_grant_type"}`)
 		return
 	}
 	code := r.PostFormValue("code")
+	if code == "" {
+		fmt.Fprintln(w, `{"error":"invalid_request","error_description":"Required param: code."}`)
+		return
+	}
 	redirectURI := r.PostFormValue("redirect_uri")
 	clientID := r.PostFormValue("client_id")
 	clientSecret := r.PostFormValue("client_secret")
 
+	var client *Client
+	for _, c := range s.clients {
+		if c.ID == clientID && c.Secret == clientSecret {
+			client = &c
+			break
+		}
+	}
+
+	if client == nil {
+		fmt.Fprintln(w, `{"error":"invalid_client","error_description":"Invalid client credentials."}`)
+		return
+	}
+
+	s.Lock()
+	conn, ok := s.connections[code]
+	s.Unlock()
+
+	if !ok {
+		log.Printf("invalid code=%q.  Connections: %v\n", code, s.connections)
+		fmt.Fprintln(w, `{"error":"invalid_grant","error_description":"Invalid or expired code parameter."}`)
+		return
+	}
+
+	if redirectURI != conn.redirectURI {
+		fmt.Fprintln(w, `{"error":"invalid_request","error_description":"redirect_uri did not match URI from initial request."}`)
+		return
+	}
+
 	fmt.Printf("code=%q redirect_uri=%q client_id=%q client_secret=%q\n",
 		code, redirectURI, clientID, clientSecret)
+	fmt.Printf("state=%q nonce=%q\n", conn.state, conn.nonce)
 
-	idToken, err := s.getIDToken()
+	idToken, err := s.getIDToken(&conn)
 	if err != nil {
 		http.Error(w, "Internal server error getting ID token.", http.StatusInternalServerError)
 		return
@@ -70,7 +104,7 @@ type IDToken struct {
 	IssuedAt          int64  `json:"iat"`
 }
 
-func (s *Server) getIDToken() (jws string, err error) {
+func (s *Server) getIDToken(conn *Connection) (jws string, err error) {
 	signingKey := jose.SigningKey{Key: s.key, Algorithm: jose.RS256}
 
 	signer, err := jose.NewSigner(signingKey, &jose.SignerOptions{})

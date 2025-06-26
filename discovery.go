@@ -8,6 +8,20 @@ import (
 	"strconv"
 )
 
+const (
+	scopeOpenid  = "openid"
+	scopeEmail   = "email"
+	scopeProfile = "profile"
+	scopeGroups  = "groups"
+)
+
+var scopesSupported = []string{
+	scopeOpenid,
+	scopeEmail,
+	scopeProfile,
+	scopeGroups,
+}
+
 type openidConfiguration struct {
 	Issuer                           string   `json:"issuer"`                                // REQUIRED
 	AuthorizationEndpoint            string   `json:"authorization_endpoint"`                // REQUIRED
@@ -32,7 +46,7 @@ func (s *Server) openIDConfiguration(w http.ResponseWriter, r *http.Request) {
 		AuthorizationEndpoint:            s.issuer + "/auth",
 		TokenEndpoint:                    s.issuer + "/token",
 		JwksURI:                          s.issuer + "/keys",
-		ScopesSupported:                  []string{"openid", "email", "profile", "groups"},
+		ScopesSupported:                  scopesSupported,
 		ResponseTypesSupported:           []string{"code"},
 		GrantTypesSupported:              []string{"authorization_code"},
 		SubjectTypesSupported:            []string{"public"},

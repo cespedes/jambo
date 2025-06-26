@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -44,6 +45,15 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	for _, scope := range scopes {
+		if !slices.Contains(scopesSupported, scope) {
+			s.template(w, r, "error.html", map[string]string{
+				"ErrorType": "Bad request",
+				"Error":     `Unrecognized scope: "` + scope + `"`,
+			})
+			return
+		}
+	}
 
 	// we only support response_type = "code"
 	if r.FormValue("response_type") != "code" {
@@ -71,7 +81,7 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 		state:       state,
 	}
 	s.Lock()
-	s.connections = append(s.connections, conn)
+	s.connections[code] = conn
 	s.Unlock()
 
 	s.template(w, r, "login.html", map[string]string{
@@ -86,17 +96,11 @@ func (s *Server) openIDAuthLogin(w http.ResponseWriter, r *http.Request) {
 	password := r.FormValue("password")
 	code := r.FormValue("code")
 
-	var conn Connection
-
 	s.Lock()
-	for i := range s.connections {
-		if code == s.connections[i].code {
-			conn = s.connections[i]
-		}
-	}
+	conn, ok := s.connections[code]
 	s.Unlock()
 
-	if conn == (Connection{}) {
+	if !ok {
 		s.template(w, r, "error.html", map[string]string{
 			"ErrorType": "Bad request",
 			"Error":     fmt.Sprintf(`Invalid code %q from request`, code),
@@ -114,7 +118,15 @@ func (s *Server) openIDAuthLogin(w http.ResponseWriter, r *http.Request) {
 	resp := s.callback(&req)
 
 	if resp.Type == ResponseTypeLoginOK {
-		http.Redirect(w, r, conn.redirectURI, http.StatusFound)
+		u, err := url.Parse(conn.redirectURI)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("redirect_uri: %v", err.Error), http.StatusBadRequest)
+		}
+		q := u.Query()
+		q.Set("code", conn.code)
+		q.Set("state", conn.state)
+		u.RawQuery = q.Encode()
+		http.Redirect(w, r, u.String(), http.StatusFound)
 		return
 
 	}

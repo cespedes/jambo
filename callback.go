@@ -29,5 +29,11 @@ const (
 )
 
 type Response struct {
-	Type ResponseType
+	Type ResponseType // the following fields depend on this type:
+
+	// If Type == ResponseTypeLoginOK:
+	User   string // login for the user. Usually the same sent in the request.
+	Name   string // user name and surname.
+	Mail   string
+	Groups []string
 }

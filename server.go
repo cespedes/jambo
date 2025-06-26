@@ -39,6 +39,8 @@ type Connection struct {
 	client      *Client
 	redirectURI string
 	state       string
+	nonce       string
+	response    Response // last response from the callback function
 }
 
 type Server struct {
@@ -58,7 +60,7 @@ type Server struct {
 
 	sync.Mutex
 
-	connections []Connection
+	connections map[string]Connection
 }
 
 func NewServer(issuer, root string) *Server {
@@ -101,6 +103,8 @@ func NewServer(issuer, root string) *Server {
 	})
 
 	s.routes()
+
+	s.connections = make(map[string]Connection)
 
 	fmt.Printf("Server ready at %s (root path is %s).\n", issuer, root)
 	return &s
