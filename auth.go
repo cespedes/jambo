@@ -11,6 +11,7 @@ import (
 	"strings"
 )
 
+// openIDAuth is the handler for the Authorization endpoint ("/auth")
 func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 	clientID := r.FormValue("client_id")
 	if clientID == "" {
@@ -79,6 +80,7 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 		client:      client,
 		redirectURI: redirectURI,
 		state:       state,
+		scopes:      scopes,
 	}
 	s.Lock()
 	s.connections[code] = conn
@@ -91,6 +93,7 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// openIDAuth is the action called from the "form" where user sends login and password
 func (s *Server) openIDAuthLogin(w http.ResponseWriter, r *http.Request) {
 	login := r.FormValue("login")
 	password := r.FormValue("password")
@@ -117,10 +120,24 @@ func (s *Server) openIDAuthLogin(w http.ResponseWriter, r *http.Request) {
 	log.Println("jambo: calling callback")
 	resp := s.callback(&req)
 
-	if resp.Type == ResponseTypeLoginOK {
+	conn.response = resp
+	s.Lock()
+	s.connections[code] = conn
+	s.Unlock()
+
+	switch resp.Type {
+	case ResponseTypeLoginFailed:
+		s.template(w, r, "login.html", map[string]string{
+			"PostURL": filepath.Join(s.root, "/auth/login"),
+			"code":    code,
+			"state":   conn.state,
+			"Invalid": "true",
+		})
+		return
+	case ResponseTypeLoginOK:
 		u, err := url.Parse(conn.redirectURI)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("redirect_uri: %v", err.Error), http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf("redirect_uri: %v", err), http.StatusBadRequest)
 		}
 		q := u.Query()
 		q.Set("code", conn.code)
@@ -128,17 +145,11 @@ func (s *Server) openIDAuthLogin(w http.ResponseWriter, r *http.Request) {
 		u.RawQuery = q.Encode()
 		http.Redirect(w, r, u.String(), http.StatusFound)
 		return
-
-	}
-	if login == "admin" && password == "secret" {
-		fmt.Fprintf(w, "login=%q password=%q conn=%v\n", login, password, conn)
+	default:
+		s.template(w, r, "error.html", map[string]string{
+			"ErrorType": `Bad response from callback`,
+			"Error":     fmt.Sprintf(`unknown response type %d`, resp.Type),
+		})
 		return
 	}
-
-	s.template(w, r, "login.html", map[string]string{
-		"PostURL": filepath.Join(s.root, "/auth/login"),
-		"code":    code,
-		"state":   conn.state,
-		"Invalid": "true",
-	})
 }

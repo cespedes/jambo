@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"embed"
-	_ "embed"
 	"encoding/hex"
 	"fmt"
 	"html/template"
@@ -40,6 +39,7 @@ type Connection struct {
 	redirectURI string
 	state       string
 	nonce       string
+	scopes      []string
 	response    Response // last response from the callback function
 }
 
@@ -165,7 +165,6 @@ func (s *Server) createKey() error {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return fmt.Errorf("failed to generate RSA key: %w", err)
-		return nil
 	}
 
 	b := make([]byte, 20)

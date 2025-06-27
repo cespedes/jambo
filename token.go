@@ -1,10 +1,12 @@
 package jambo
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -64,7 +66,7 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response := map[string]string{
-		"access_token": "foo",
+		"access_token": rand.Text(), // we are not using this; any value should be OK
 		"token_type":   "Bearer",
 		"id_token":     idToken,
 		// "expires_in": // optional
@@ -90,18 +92,21 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Pragma", "no-cache")
 
 	fmt.Fprintln(w, string(data))
-	fmt.Println("=======")
-	fmt.Println(string(data))
 }
 
 // https://openid.net/specs/openid-connect-core-1_0.html#rfc.section.2
-// TODO: add support for "nonce"
 type IDToken struct {
-	Issuer            string `json:"iss"`
-	SubjectIdentifier string `json:"sub"`
-	Audience          string `json:"aud"`
-	Expiration        int64  `json:"exp"`
-	IssuedAt          int64  `json:"iat"`
+	Issuer            string   `json:"iss"`
+	SubjectIdentifier string   `json:"sub"`
+	Audience          string   `json:"aud"`
+	Expiration        int64    `json:"exp"`
+	IssuedAt          int64    `json:"iat"`
+	Nonce             string   `json:"nonce,omitempty"`
+	PreferredUsername string   `json:"preferred_username,omitempty"`
+	Name              string   `json:"name,omitempty"`
+	Email             string   `json:"email,omitempty"`
+	EmailVerified     bool     `json:"email_verified,omitempty"`
+	Groups            []string `json:"groups,omitempty"`
 }
 
 func (s *Server) getIDToken(conn *Connection) (jws string, err error) {
@@ -114,11 +119,26 @@ func (s *Server) getIDToken(conn *Connection) (jws string, err error) {
 
 	idToken := IDToken{
 		Issuer:            s.issuer,
-		SubjectIdentifier: "example-app",
-		Audience:          "example-app",
+		SubjectIdentifier: conn.response.User,
+		Audience:          conn.client.ID,
 		Expiration:        time.Now().Unix() + 3600, // expires in 1 hour
 		IssuedAt:          time.Now().Unix(),
+		Nonce:             conn.nonce,
 	}
+	if slices.Contains(conn.scopes, scopeProfile) {
+		idToken.Name = conn.response.Name
+		idToken.PreferredUsername = conn.response.User
+	}
+	if slices.Contains(conn.scopes, scopeEmail) {
+		idToken.Email = conn.response.Mail
+		if idToken.Email != "" {
+			idToken.EmailVerified = true
+		}
+	}
+	if slices.Contains(conn.scopes, scopeGroups) {
+		idToken.Groups = conn.response.Groups
+	}
+
 	b, err := json.Marshal(idToken)
 	if err != nil {
 		return "", err
