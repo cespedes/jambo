@@ -81,8 +81,13 @@ func NewServer(issuer, root string) *Server {
 	}
 
 	// fmt.Println("# Static files")
-	// err = fs.WalkDir(s.webStatic, ".", fs.WalkDirFunc(func(path string, d fs.DirEntry, err error) error {
-	// 	fmt.Printf("%v\n", d)
+	// fs.WalkDir(s.webStatic, ".", fs.WalkDirFunc(func(path string, d fs.DirEntry, err error) error {
+	// 	if d.IsDir() {
+	// 		fmt.Print("D")
+	// 	} else {
+	// 		fmt.Print("-")
+	// 	}
+	// 	fmt.Printf(" %s\n", path)
 	// 	return nil
 	// }))
 
@@ -106,7 +111,7 @@ func NewServer(issuer, root string) *Server {
 
 	s.connections = make(map[string]Connection)
 
-	fmt.Printf("Server ready at %s (root path is %s).\n", issuer, root)
+	// fmt.Printf("Server ready at %s (root path is %s).\n", issuer, root)
 	return &s
 }
 
@@ -151,8 +156,38 @@ func (s *Server) routes() {
 	})
 }
 
+// AddStaticFS adds the content of a filesystem (a [fs.FS]) to the list of static files
+// served by a Server.
 func (s *Server) AddStaticFS(filesystem fs.FS) {
-	s.webStatic = mergefs.Merge(s.webStatic, filesystem)
+	s.webStatic = mergefs.Merge(filesystem, s.webStatic)
+	// fmt.Println("# New static files")
+	// fs.WalkDir(s.webStatic, ".", fs.WalkDirFunc(func(path string, d fs.DirEntry, err error) error {
+	// 	if d.IsDir() {
+	// 		fmt.Print("D")
+	// 	} else {
+	// 		fmt.Print("-")
+	// 	}
+	// 	fmt.Printf(" %s\n", path)
+	// 	return nil
+	// }))
+}
+
+// AddTemplatesFS adds the files inside a [fs.FS] to the list of templates processed by a Server.
+func (s *Server) AddTemplatesFS(filesystem fs.FS) error {
+	var err error
+
+	s.webTemplates, err = s.webTemplates.ParseFS(filesystem, "*")
+
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("# New templates")
+	for _, t := range s.webTemplates.Templates() {
+		fmt.Printf("- %s\n", t.Name())
+	}
+
+	return nil
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
