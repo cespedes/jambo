@@ -24,8 +24,8 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 
 	var client *Client
 	for _, c := range s.clients {
-		if c.ID == clientID {
-			client = &c
+		if c.id == clientID {
+			client = c
 			break
 		}
 	}
@@ -47,7 +47,7 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, scope := range scopes {
-		if !slices.Contains(scopesSupported, scope) {
+		if !slices.Contains(scopesSupported, scope) && !slices.Contains(client.scopes, scope) {
 			s.template(w, r, "error.html", map[string]string{
 				"ErrorType": "Bad request",
 				"Error":     `Unrecognized scope: "` + scope + `"`,
@@ -65,7 +65,7 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	redirectURI := r.FormValue("redirect_uri")
-	if !slices.Contains(client.RedirectURIs, redirectURI) {
+	if !slices.Contains(client.redirectURIs, redirectURI) {
 		s.template(w, r, "error.html", map[string]string{
 			"Error": fmt.Sprintf(`Unregistered redirect_uri ("%s")`, redirectURI),
 		})
@@ -93,7 +93,7 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// openIDAuth is the action called from the "form" where user sends login and password
+// openIDAuthLogin is the action called from the "form" where user sends login and password
 func (s *Server) openIDAuthLogin(w http.ResponseWriter, r *http.Request) {
 	login := r.FormValue("login")
 	password := r.FormValue("password")
@@ -113,9 +113,10 @@ func (s *Server) openIDAuthLogin(w http.ResponseWriter, r *http.Request) {
 
 	req := Request{
 		Type:     RequestTypeUserPassword,
-		Client:   conn.client.ID,
+		Client:   conn.client.id,
 		User:     login,
 		Password: password,
+		Scopes:   conn.scopes,
 	}
 	log.Println("jambo: calling callback")
 	resp := s.callback(&req)
@@ -145,6 +146,7 @@ func (s *Server) openIDAuthLogin(w http.ResponseWriter, r *http.Request) {
 		u.RawQuery = q.Encode()
 		http.Redirect(w, r, u.String(), http.StatusFound)
 		return
+	case ResponseType2FANeeded:
 	default:
 		s.template(w, r, "error.html", map[string]string{
 			"ErrorType": `Bad response from callback`,

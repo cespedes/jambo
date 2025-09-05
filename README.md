@@ -49,6 +49,16 @@ The OpenID Connect specification is here:
 - `https://openid.net/specs/openid-connect-discovery-1_0.html`
 - `https://openid.net/specs/openid-connect-core-1_0.html`
 
+# HTTP server endpoints
+
+|-------------------------------------|
+| `/.well-known/openid-configuration` | OpenID configuration                                       |
+| `/auth`                             | HTML page to ask for credentials                           |
+| `POST /auth/request`                | to send login information (password, OTP...) to the server |
+| `POST /token`                       | to send the _code_ and get the _access token_              |
+| `/keys`                             | get the list of keys used to sign the tokens               |
+|-------------------------------------|
+
 # Other OpenID Connect providers
 
 - https://github.com/ory/hydra
@@ -62,10 +72,10 @@ The OpenID Connect specification is here:
 - User goes to (client-end-point)
 - (client-end-point) redirects user to (issuer)/auth
 - In that page, it asks for user and password
-- jambo calls authenticate(user, password)
+- jambo uses callback to authenticate
 - If password is incorrect, inform and try again
 - If password is correct and 2FA is not needed, authenticate and redirect to (client-callback)
-- If password is correct and 2FA is needed, show 2FA options and let the user choose 1
+- If password is correct and 2FA is needed, show 2FA options and let the user choose one
 - After choosing one, do some things (like sending an SMS)
   and ask for additional info (secret sent via SMS)
 - If secret is correct, authenticate and proceed to (client-callback)

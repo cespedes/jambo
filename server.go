@@ -28,9 +28,10 @@ var _webStatic embed.FS
 var _webTemplates embed.FS
 
 type Client struct {
-	ID           string
-	Secret       string
-	RedirectURIs []string
+	id           string
+	secret       string
+	redirectURIs []string
+	scopes       []string // allowed extra scopes
 }
 
 type Connection struct {
@@ -56,7 +57,7 @@ type Server struct {
 
 	webStatic    fs.FS
 	webTemplates *template.Template
-	clients      []Client
+	clients      []*Client
 
 	sync.Mutex
 
@@ -233,10 +234,10 @@ func (s *Server) SetCallback(f func(req *Request) Response) {
 // AddClient adds a new client to the server.
 // It cannot be used concurrently with any other access to Server.
 func (s *Server) AddClient(clientID, clientSecret string, redirectURIs []string) {
-	s.clients = append(s.clients, Client{
-		ID:           clientID,
-		Secret:       clientSecret,
-		RedirectURIs: redirectURIs,
+	s.clients = append(s.clients, &Client{
+		id:           clientID,
+		secret:       clientSecret,
+		redirectURIs: redirectURIs,
 	})
 }
 
@@ -249,4 +250,21 @@ func (s *Server) SetClient(r *http.Request, client *Client) *http.Request {
 func (s *Server) GetClient(r *http.Request) *Client {
 	c, _ := r.Context().Value(contextClient{}).(*Client)
 	return c
+}
+
+func (s *Server) NewClient(name, secret string) *Client {
+	c := &Client{
+		id:     name,
+		secret: secret,
+	}
+	s.clients = append(s.clients, c)
+	return c
+}
+
+func (c *Client) AddRedirectURI(name string) {
+	c.redirectURIs = append(c.redirectURIs, name)
+}
+
+func (c *Client) AddScope(name string) {
+	c.scopes = append(c.scopes, name)
 }

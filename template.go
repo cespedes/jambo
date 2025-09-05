@@ -12,7 +12,7 @@ func (s *Server) template(w http.ResponseWriter, r *http.Request, name string, d
 	dest["Root"] = s.root
 	dest["Issuer"] = s.issuer
 	if c := s.GetClient(r); c != nil {
-		dest["Client"] = c.ID
+		dest["Client"] = c.id
 	}
 
 	err := s.webTemplates.ExecuteTemplate(w, name, dest)

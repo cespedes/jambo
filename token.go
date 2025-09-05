@@ -30,8 +30,8 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 
 	var client *Client
 	for _, c := range s.clients {
-		if c.ID == clientID && c.Secret == clientSecret {
-			client = &c
+		if c.id == clientID && c.secret == clientSecret {
+			client = c
 			break
 		}
 	}
@@ -120,7 +120,7 @@ func (s *Server) getIDToken(conn *Connection) (jws string, err error) {
 	idToken := IDToken{
 		Issuer:            s.issuer,
 		SubjectIdentifier: conn.response.User,
-		Audience:          conn.client.ID,
+		Audience:          conn.client.id,
 		Expiration:        time.Now().Unix() + 3600, // expires in 1 hour
 		IssuedAt:          time.Now().Unix(),
 		Nonce:             conn.nonce,

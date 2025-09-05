@@ -53,11 +53,13 @@ func (s *Server) openIDConfiguration(w http.ResponseWriter, r *http.Request) {
 		IDTokenSigningAlgValuesSupported: []string{"RS256"},
 		// UserInfoEndpoint:                 s.issuer + "/userinfo", // TODO: not implemented
 		ClaimsSupported: []string{
-			"iss",                // Issuer.
-			"sub",                // Subject.
-			"aud",                // Audience.
-			"exp",                // Expiration time after which the JWT MUST NOT be accepted for processing.
-			"iat",                // Time at which the JWT was issued.
+			// Required claims:
+			"iss", // Issuer.
+			"sub", // Subject.
+			"aud", // Audience.
+			"exp", // Expiration time after which the JWT MUST NOT be accepted for processing.
+			"iat", // Time at which the JWT was issued.
+			// User profile claims:
 			"name",               // Full name
 			"email",              // Preferred e-mail address
 			"preferred_username", // Shorthand name by which the End-User wishes to be referred to.
