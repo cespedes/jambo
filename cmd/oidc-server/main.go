@@ -29,9 +29,10 @@ func run(args []string) error {
 
 	clientID := "test-client"
 	clientSecret := "client-secret"
-	s.AddClient(clientID, clientSecret, []string{"http://127.0.0.1:5555/callback"})
+	client := s.NewClient(clientID, clientSecret)
+	client.AddAllowedRedirectURIs("http://127.0.0.1:5555/callback")
 
-	s.SetCallback(func(req *jambo.Request) jambo.Response {
+	s.AddAuthenticator("auth", func(req *jambo.Request) jambo.Response {
 		if req.User == "admin" && req.Password == "secret" {
 			return jambo.Response{Type: jambo.ResponseTypeLoginOK}
 		}

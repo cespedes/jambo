@@ -13,6 +13,14 @@ import (
 
 // openIDAuth is the handler for the Authorization endpoint ("/auth")
 func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
+	conn := Connection{
+		code:        rand.Text(),
+		redirectURI: r.FormValue("redirect_uri"),
+		state:       r.FormValue("state"),
+		scopes:      strings.Fields(r.FormValue("scope")),
+	}
+	r = s.SetConnection(r, &conn)
+
 	clientID := r.FormValue("client_id")
 	if clientID == "" {
 		s.template(w, r, "error.html", map[string]string{
@@ -22,32 +30,29 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var client *Client
 	for _, c := range s.clients {
 		if c.id == clientID {
-			client = c
+			conn.client = c
 			break
 		}
 	}
-	if client == nil {
+	if conn.client == nil {
 		s.template(w, r, "error.html", map[string]string{
 			"Error": fmt.Sprintf(`unknown client "%s"`, clientID),
 		})
 		return
 	}
-	r = s.SetClient(r, client)
 
-	// OpenID Connect requests MUST contain the openid scope value
-	scopes := strings.Fields(r.FormValue("scope"))
-	if !slices.Contains(scopes, "openid") {
+	// OpenID Connect requests MUST contain the "openid" scope value
+	if !slices.Contains(conn.scopes, "openid") {
 		s.template(w, r, "error.html", map[string]string{
 			"ErrorType": "Bad request",
 			"Error":     `Missing required scope: "openid"`,
 		})
 		return
 	}
-	for _, scope := range scopes {
-		if !slices.Contains(scopesSupported, scope) && !slices.Contains(client.scopes, scope) {
+	for _, scope := range conn.scopes {
+		if !slices.Contains(scopesSupported, scope) && !slices.Contains(conn.client.allowedScopes, scope) {
 			s.template(w, r, "error.html", map[string]string{
 				"ErrorType": "Bad request",
 				"Error":     `Unrecognized scope: "` + scope + `"`,
@@ -64,32 +69,21 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	redirectURI := r.FormValue("redirect_uri")
-	if !slices.Contains(client.redirectURIs, redirectURI) {
+	if !slices.Contains(conn.client.allowedRedirectURIs, conn.redirectURI) {
 		s.template(w, r, "error.html", map[string]string{
-			"Error": fmt.Sprintf(`Unregistered redirect_uri ("%s")`, redirectURI),
+			"Error": fmt.Sprintf(`Unregistered redirect_uri ("%s")`, conn.redirectURI),
 		})
 		return
 	}
 
-	state := r.FormValue("state")
-	code := rand.Text()
-
-	conn := Connection{
-		code:        code,
-		client:      client,
-		redirectURI: redirectURI,
-		state:       state,
-		scopes:      scopes,
-	}
 	s.Lock()
-	s.connections[code] = conn
+	s.connections[conn.code] = conn
 	s.Unlock()
 
 	s.template(w, r, "login.html", map[string]string{
 		"PostURL": filepath.Join(s.root, "/auth/login"),
-		"code":    code,
-		"state":   state,
+		"code":    conn.code,
+		"state":   conn.state,
 	})
 }
 
@@ -118,8 +112,14 @@ func (s *Server) openIDAuthLogin(w http.ResponseWriter, r *http.Request) {
 		Password: password,
 		Scopes:   conn.scopes,
 	}
-	log.Println("jambo: calling callback")
-	resp := s.callback(&req)
+	var resp Response
+	for name, auth := range s.authenticators {
+		log.Println("jambo: calling auth[%s]", name)
+		resp = auth(&req)
+		if resp.Type != ResponseTypeInvalid && resp.Type != ResponseTypeLoginFailed {
+			break
+		}
+	}
 
 	conn.response = resp
 	s.Lock()

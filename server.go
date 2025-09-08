@@ -28,10 +28,12 @@ var _webStatic embed.FS
 var _webTemplates embed.FS
 
 type Client struct {
-	id           string
-	secret       string
-	redirectURIs []string
-	scopes       []string // allowed extra scopes
+	id                    string
+	secret                string
+	allowedRedirectURIs   []string
+	allowedScopes         []string // allowed extra scopes
+	allowedAuthenticators []string // if empty, any authenticator is allowed
+	allowedRoles          []string // if empty, any user is allowed
 }
 
 type Connection struct {
@@ -41,7 +43,7 @@ type Connection struct {
 	state       string
 	nonce       string
 	scopes      []string
-	response    Response // last response from the callback function
+	response    Response // last response from the authenticator
 }
 
 type Server struct {
@@ -53,13 +55,13 @@ type Server struct {
 	key     jose.JSONWebKey
 	allKeys jose.JSONWebKeySet
 
-	callback func(*Request) Response
+	authenticators map[string]func(*Request) Response
 
 	webStatic    fs.FS
 	webTemplates *template.Template
 	clients      []*Client
 
-	sync.Mutex
+	sync.Mutex // to access authenticators, clients and connections
 
 	connections map[string]Connection
 }
@@ -70,6 +72,7 @@ func NewServer(issuer, root string) *Server {
 	var s Server
 	s.root = root
 	s.issuer = issuer
+	s.authenticators = make(map[string]func(*Request) Response)
 
 	err = s.createKey()
 	if err != nil {
@@ -227,28 +230,30 @@ func (s *Server) createKey() error {
 	return nil
 }
 
-func (s *Server) SetCallback(f func(req *Request) Response) {
-	s.callback = f
+func (s *Server) AddAuthenticator(name string, f func(req *Request) Response) {
+	s.authenticators[name] = f
 }
 
 // AddClient adds a new client to the server.
-// It cannot be used concurrently with any other access to Server.
-func (s *Server) AddClient(clientID, clientSecret string, redirectURIs []string) {
+func (s *Server) AddClient(clientID, clientSecret string) {
+	s.Lock()
 	s.clients = append(s.clients, &Client{
-		id:           clientID,
-		secret:       clientSecret,
-		redirectURIs: redirectURIs,
+		id:     clientID,
+		secret: clientSecret,
 	})
+	s.Unlock()
 }
 
-type contextClient struct{}
+type contextKey struct{}
 
-func (s *Server) SetClient(r *http.Request, client *Client) *http.Request {
-	return r.WithContext(context.WithValue(r.Context(), contextClient{}, client))
+// SetConnection stores a Connection in a http.Request
+func (s *Server) SetConnection(r *http.Request, conn *Connection) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), contextKey{}, conn))
 }
 
-func (s *Server) GetClient(r *http.Request) *Client {
-	c, _ := r.Context().Value(contextClient{}).(*Client)
+// SetConnection gets a Connection previously stored in a http.Request
+func (s *Server) GetConnection(r *http.Request) *Connection {
+	c, _ := r.Context().Value(contextKey{}).(*Connection)
 	return c
 }
 
@@ -261,10 +266,22 @@ func (s *Server) NewClient(name, secret string) *Client {
 	return c
 }
 
-func (c *Client) AddRedirectURI(name string) {
-	c.redirectURIs = append(c.redirectURIs, name)
+func (c *Client) AddAllowedRedirectURIs(names ...string) {
+	c.allowedRedirectURIs = append(c.allowedRedirectURIs, names...)
 }
 
-func (c *Client) AddScope(name string) {
-	c.scopes = append(c.scopes, name)
+func (c *Client) AddAllowedScopes(names ...string) {
+	c.allowedScopes = append(c.allowedScopes, names...)
 }
+
+func (c *Client) AddAllowedAuthenticators(names ...string) {
+	c.allowedAuthenticators = append(c.allowedAuthenticators, names...)
+}
+
+func (c *Client) AddAllowedRoles(names ...string) {
+	c.allowedRoles = append(c.allowedRoles, names...)
+}
+
+//	allowedScopes         []string // allowed extra scopes
+//	allowedAuthenticators []string // if empty, any authenticator is allowed
+//	allowedRoles          []string // if empty, any user is allowed

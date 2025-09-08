@@ -39,8 +39,8 @@ type Response struct {
 	// e-mail address.  Used in claim "email".
 	Mail string
 
-	// List of groups
-	Groups []string
+	// Roles is used as permissions to know what clients this user can use.
+	Roles []string
 
 	// Other claims:
 	Claims map[string]any

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
+	"github.com/iancoleman/orderedmap"
 )
 
 func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
@@ -96,17 +97,49 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 
 // https://openid.net/specs/openid-connect-core-1_0.html#rfc.section.2
 type IDToken struct {
-	Issuer            string   `json:"iss"`
-	SubjectIdentifier string   `json:"sub"`
-	Audience          string   `json:"aud"`
-	Expiration        int64    `json:"exp"`
-	IssuedAt          int64    `json:"iat"`
-	Nonce             string   `json:"nonce,omitempty"`
-	PreferredUsername string   `json:"preferred_username,omitempty"`
-	Name              string   `json:"name,omitempty"`
-	Email             string   `json:"email,omitempty"`
-	EmailVerified     bool     `json:"email_verified,omitempty"`
-	Groups            []string `json:"groups,omitempty"`
+	// Standard claims:
+	Issuer            string `json:"iss"`
+	SubjectIdentifier string `json:"sub"`
+	Audience          string `json:"aud"`
+	Expiration        int64  `json:"exp"`
+	IssuedAt          int64  `json:"iat"`
+	Nonce             string `json:"nonce,omitempty"`
+	PreferredUsername string `json:"preferred_username,omitempty"`
+	Name              string `json:"name,omitempty"`
+	Email             string `json:"email,omitempty"`
+	EmailVerified     bool   `json:"email_verified,omitempty"`
+
+	// Other claims:
+	Claims map[string]any
+}
+
+func (idt IDToken) MarshalJSON() ([]byte, error) {
+	// an Event will be marshaled with all its keys next to those in Extra.
+	om := orderedmap.New()
+	om.Set("iss", idt.Issuer)
+	om.Set("sub", idt.SubjectIdentifier)
+	om.Set("aud", idt.Audience)
+	om.Set("exp", idt.Expiration)
+	if idt.Nonce != "" {
+		om.Set("nonce", idt.Nonce)
+	}
+	if idt.PreferredUsername != "" {
+		om.Set("preferred_username", idt.PreferredUsername)
+	}
+	if idt.Name != "" {
+		om.Set("name", idt.Name)
+	}
+	if idt.Email != "" {
+		om.Set("email", idt.Email)
+	}
+	if idt.EmailVerified {
+		om.Set("email_verified", idt.EmailVerified)
+	}
+
+	for k, v := range idt.Claims {
+		om.Set(k, v)
+	}
+	return json.Marshal(om)
 }
 
 func (s *Server) getIDToken(conn *Connection) (jws string, err error) {
@@ -134,9 +167,6 @@ func (s *Server) getIDToken(conn *Connection) (jws string, err error) {
 		if idToken.Email != "" {
 			idToken.EmailVerified = true
 		}
-	}
-	if slices.Contains(conn.scopes, scopeGroups) {
-		idToken.Groups = conn.response.Groups
 	}
 
 	b, err := json.Marshal(idToken)
