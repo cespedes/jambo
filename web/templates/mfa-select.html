@@ -1,0 +1,103 @@
+{{ template "header.html" . }}
+<div class="panel mfa">
+    <div id="mfa-content">
+        <h2>Loading...</h2>
+    </div>
+</div>
+
+<script>
+    const code = '{{ .code }}';
+    const state = '{{ .state }}';
+    const methods = '{{ .methods }}'.split(',');
+    const name = '{{ .name }}';
+
+    const html = {
+        mfabutton: (method, text) => `<button onclick="selectMethod('${method}')" class="mfa-button">${text || method.toUpperCase()}</button>`,
+        totp: () => `
+            <h2 class="heading">Hi, ${name}</h2>
+            <p>Enter the 6-digit code from your authentication app:</p>
+            <input type="text" id="totp-code" placeholder="XXXXXX" maxlength="6" autocomplete="one-time-code">
+            <button onclick="verify('totp')" class="verify">Verify</button>
+            ${methods.length > 1 ? html.mfabutton('sms', 'Send code via SMS') : ''}
+            <div id="error-message" style="display: none;" class="error-box"></div>`,
+        sms: () => `
+            <h2 class="heading">Hi, ${name}</h2>
+            <p id="sms-status">Sending code to your phone...</p>
+            <div id="sms-form" style="display: none;">
+                <input type="text" id="sms-code" placeholder="XXXXXX" maxlength="6" autocomplete="one-time-code">
+                <button onclick="verify('sms')" class="verify">Verify</button>
+                ${methods.length > 1 ? '<button onclick=selectMethod("totp")>Back</button>' : ''}
+            </div>
+            <div id="error-message" style="display: none;" class="error-box"></div>`,
+    }
+
+    showMethods(methods);
+
+    function showMethods(methods) {
+        if (methods.length === 1) {
+            selectMethod(methods[0]);
+        } else {
+            multipleOptions();
+        }
+    }
+
+    function multipleOptions() {
+        const div = document.getElementById('mfa-content');
+        div.innerHTML = html.totp();
+    }
+
+    function selectMethod(method) {
+        const element = document.getElementById('mfa-content');
+        switch (method) {
+            case 'sms':
+                element.innerHTML = html.sms();
+                sendSMS();
+                break;
+            case 'totp':
+                element.innerHTML = html.totp();
+                document.getElementById('totp-code').focus();
+                break;
+            default:
+                element.innerHTML = '<h2 class="heading">Unknown Method</h2><p>The selected authentication method is not recognized.</p>';
+                break;
+        }
+    }
+
+    async function sendSMS() {
+        try {
+            // setTimeout(() => {
+            //     document.getElementById('sms-status').textContent = 'Code sent! Enter it below:';
+            //     document.getElementById('sms-form').style.display = 'block';
+            //     document.getElementById('sms-code').focus();
+            // }, 1000);
+        } catch (error) {
+            showError('Failed to send SMS. Please try again.');
+        }
+    }
+
+    function verify(method) {
+        const value = document.getElementById(method + '-code')?.value;
+
+        if (!value) {
+            showError('Please enter the code.');
+            return;
+        }
+        if (value.length !== 6) {
+            showError('Please enter a 6-digit code.');
+            return;
+        }
+
+        console.log(`Verifying ${method} with code: ${value}`);
+
+        showError('Verification not implemented yet.');
+    }
+
+    function showError(message) {
+        const errorDiv = document.getElementById('error-message');
+        if (errorDiv) {
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+    }
+</script>
+{{ template "footer.html" . }}

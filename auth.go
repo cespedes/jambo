@@ -147,6 +147,20 @@ func (s *Server) openIDAuthLogin(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, u.String(), http.StatusFound)
 		return
 	case ResponseType2FANeeded:
+		if len(resp.MFAMethods) <= 0 {
+			s.template(w, r, "error.html", map[string]string{
+				"ErrorType": `Bad response from callback`,
+				"Error":     `ResponseType2FANeeded but no MFA methods provided`,
+			})
+			return
+		}
+
+		s.template(w, r, "mfa-select.html", map[string]string{
+			"code":    code,
+			"state":   conn.state,
+			"methods": strings.Join(resp.MFAMethods, ","),
+			"name":    resp.Name,
+		})
 	default:
 		s.template(w, r, "error.html", map[string]string{
 			"ErrorType": `Bad response from callback`,
