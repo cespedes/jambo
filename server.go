@@ -21,6 +21,8 @@ import (
 	"github.com/go-jose/go-jose/v4"
 )
 
+const _DEBUG = false
+
 //go:embed web/static
 var _webStatic embed.FS
 
@@ -84,16 +86,18 @@ func NewServer(issuer, root string) *Server {
 		log.Fatal(err)
 	}
 
-	// fmt.Println("# Static files")
-	// fs.WalkDir(s.webStatic, ".", fs.WalkDirFunc(func(path string, d fs.DirEntry, err error) error {
-	// 	if d.IsDir() {
-	// 		fmt.Print("D")
-	// 	} else {
-	// 		fmt.Print("-")
-	// 	}
-	// 	fmt.Printf(" %s\n", path)
-	// 	return nil
-	// }))
+	if _DEBUG {
+		fmt.Println("# Static files")
+		fs.WalkDir(s.webStatic, ".", fs.WalkDirFunc(func(path string, d fs.DirEntry, err error) error {
+			if d.IsDir() {
+				fmt.Print("D")
+			} else {
+				fmt.Print("-")
+			}
+			fmt.Printf(" %s\n", path)
+			return nil
+		}))
+	}
 
 	s.webTemplates, err = template.ParseFS(_webTemplates, "web/templates/*")
 	if err != nil {
@@ -101,10 +105,12 @@ func NewServer(issuer, root string) *Server {
 		return nil
 	}
 
-	// fmt.Println("# Templates")
-	// for _, t := range s.webTemplates.Templates() {
-	// 	fmt.Printf("- %s\n", t.Name())
-	// }
+	if _DEBUG {
+		fmt.Println("# Templates")
+		for _, t := range s.webTemplates.Templates() {
+			fmt.Printf("- %s\n", t.Name())
+		}
+	}
 
 	s.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("%s %s %v\n", r.Method, r.URL, r)
@@ -234,16 +240,6 @@ func (s *Server) AddAuthenticator(name string, f func(req *Request) Response) {
 	s.authenticators[name] = f
 }
 
-// AddClient adds a new client to the server.
-func (s *Server) AddClient(clientID, clientSecret string) {
-	s.Lock()
-	s.clients = append(s.clients, &Client{
-		id:     clientID,
-		secret: clientSecret,
-	})
-	s.Unlock()
-}
-
 type contextKey struct{}
 
 // SetConnection stores a Connection in a http.Request
@@ -278,6 +274,10 @@ func (c *Client) AddAllowedAuthenticators(names ...string) {
 	c.allowedAuthenticators = append(c.allowedAuthenticators, names...)
 }
 
+// AddAllowedRoles adds one or more roles to the list of the
+// allowed roles for users.  If there are no allowed roles, any user
+// can log in.  If there is at least one, the users must belong to one
+// of them.
 func (c *Client) AddAllowedRoles(names ...string) {
 	c.allowedRoles = append(c.allowedRoles, names...)
 }

@@ -51,6 +51,9 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	// All other scopes are optional.
+	// If a client sends an unrecognized scope, we send an error.
 	for _, scope := range conn.scopes {
 		if !slices.Contains(scopesSupported, scope) && !slices.Contains(conn.client.allowedScopes, scope) {
 			s.template(w, r, "error.html", map[string]string{
@@ -61,7 +64,7 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// we only support response_type = "code"
+	// We only support response_type = "code"
 	if r.FormValue("response_type") != "code" {
 		s.template(w, r, "error.html", map[string]string{
 			"Error": `Field "response_type" must be "code"`,
