@@ -45,7 +45,7 @@ type Response struct {
 	// Other claims:
 	Claims map[string]any
 
-	// If Type == ResponseType2FANeeded:
+	// If Type == ResponseTypeMFARequired:
 	MFAMethods []string // list of MFA methods this user accepts (e.g., "sms", "totp")
 }
 
@@ -53,8 +53,7 @@ type ResponseType int
 
 const (
 	ResponseTypeInvalid     ResponseType = iota
-	ResponseTypeOK                       // No errors
 	ResponseTypeLoginOK                  // login is successful
 	ResponseTypeLoginFailed              // login failed
-	ResponseType2FANeeded                // login is successful so far, but we need 2FA
+	ResponseTypeRedirect                 // login is OK so far, but we are not finished yet
 )

@@ -28,11 +28,19 @@ func main() {
 	clientSecret := "client-secret"
 	s.AddClient(clientID, clientSecret)
 
-	s.SetCallback(func (user, pass string) bool {
-		if req.User == "admin" && req.Password == "secret" {
-			return jambo.Response{Type: jambo.ResponseTypeLoginOK}
+	s.AddAuthenticator("auth", func (req *jambo.Request) *jambo.Response {
+		if req.Params["login"] == "admin" && req.Params["pass"] == "secret" {
+			return jambo.Response{
+                Type: jambo.ResponseTypeLoginOK,
+                Claims: map[string]any {
+                    "login": "admin",
+                    "name": "Charlie Root",
+                },
+            }
 		}
-		return jambo.Response{Type: jambo.ResponseTypeLoginFailed}
+		return jambo.Response{
+            Type: jambo.ResponseTypeLoginFailed,
+        }
 	})
 
 	http.ListenAndServe(":8080", s)
@@ -51,13 +59,38 @@ The OpenID Connect specification is here:
 
 # HTTP server endpoints
 
-|-------------------------------------|
-| `/.well-known/openid-configuration` | OpenID configuration                                       |
+| endpoint                            | description
+|-------------------------------------|------------------------------------------------------------|
+| `/.well-known/openid-configuration` | OpenID Connect configuration                               |
 | `/auth`                             | HTML page to ask for credentials                           |
 | `POST /auth/request`                | to send login information (password, OTP...) to the server |
-| `POST /token`                       | to send the _code_ and get the _access token_              |
+| `POST /token`                       | used by clients to send the _code_ and get _access token_  |
 | `/keys`                             | get the list of keys used to sign the tokens               |
-|-------------------------------------|
+
+# Workflow
+
+We will assume Alice (client) wants to connect to a GitLab instance (client),
+which is configured to authenticate using Jambo, our OpenID Connect provider.
+
+- Alice opens a web browser and goes to GitLab page (https://gitlab.example.com).
+- GitLab redirects to Jambo's authentication page (https://jambo.example.com/auth),
+  with query parameters specifying the client (GitLab) and the list of the required scopes.
+- Jambo reads the query parameters and checks if the client exists and the URL is well-formed.
+- Jambo creates a session for this connection and stores its state.
+- Jambo parses a HTML template and offers it to Alice a login page (typically with a HTML form).
+- Alice fills the user and password and presses "submit".
+- The form is posted to the authentication page (https://jambo.example.com/auth/request).
+- Jambo receives the request, checks if it somes from an active session, and calls the
+  Authenticator function with all the parameters received from the form.
+- The Authentication function checks the parameters and returns a "Login OK".
+- Jambo optionally redirects to an approval HTML template, with a summary and a way to
+  continue to the client (GitLab).
+- When Alice clicks "OK", Jambo redirects to the GitLab's "callback address"
+- GitLab receives the request with a "code"
+- GitLab connects to Jambo in background, sending the "code" and the "client secret".
+- Jambo replies with an _access token_ which contains a Base64-JSON-encoded object with the
+  claims (login, name, e-mail... depending on the requested scopes).
+- GitLab receives the response and sends Alice the GitLab page, already authenticated.
 
 # Other OpenID Connect providers
 
@@ -66,16 +99,3 @@ The OpenID Connect specification is here:
 - https://github.com/zitadel/zitadel
 - https://github.com/keycloak/keycloak (written in Java)
 - https://github.com/goauthentik/authentik (Python / Javascript)
-
-# 2FA workflow
-
-- User goes to (client-end-point)
-- (client-end-point) redirects user to (issuer)/auth
-- In that page, it asks for user and password
-- jambo uses callback to authenticate
-- If password is incorrect, inform and try again
-- If password is correct and 2FA is not needed, authenticate and redirect to (client-callback)
-- If password is correct and 2FA is needed, show 2FA options and let the user choose one
-- After choosing one, do some things (like sending an SMS)
-  and ask for additional info (secret sent via SMS)
-- If secret is correct, authenticate and proceed to (client-callback)
