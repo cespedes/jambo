@@ -30,12 +30,11 @@ var _webStatic embed.FS
 var _webTemplates embed.FS
 
 type Client struct {
-	id                    string
-	secret                string
-	allowedRedirectURIs   []string
-	allowedScopes         []string // allowed extra scopes
-	allowedAuthenticators []string // if empty, any authenticator is allowed
-	allowedRoles          []string // if empty, any user is allowed
+	id                  string
+	secret              string
+	allowedRedirectURIs []string
+	allowedScopes       []string // allowed extra scopes
+	allowedRoles        []string // if empty, any user is allowed
 }
 
 type Connection struct {
@@ -49,22 +48,22 @@ type Connection struct {
 }
 
 type Server struct {
-	root    string
-	issuer  string
-	handler http.Handler
-	mux     *http.ServeMux
+	// General configuration of server:
+	root          string
+	issuer        string
+	handler       http.Handler
+	authenticator func(*Request) Response
 
+	// web pages:
+	webStatic    fs.FS
+	webTemplates *template.Template
+
+	mux     *http.ServeMux
 	key     jose.JSONWebKey
 	allKeys jose.JSONWebKeySet
 
-	authenticators map[string]func(*Request) Response
-
-	webStatic    fs.FS
-	webTemplates *template.Template
-	clients      []*Client
-
-	sync.Mutex // to access authenticators, clients and connections
-
+	sync.Mutex  // to access clients and connections
+	clients     []*Client
 	connections map[string]Connection
 }
 
@@ -74,7 +73,6 @@ func NewServer(issuer, root string) *Server {
 	var s Server
 	s.root = root
 	s.issuer = issuer
-	s.authenticators = make(map[string]func(*Request) Response)
 
 	err = s.createKey()
 	if err != nil {
@@ -113,7 +111,7 @@ func NewServer(issuer, root string) *Server {
 	}
 
 	s.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("%s %s %v\n", r.Method, r.URL, r)
+		log.Printf("%s %s\n", r.Method, r.URL)
 		s.mux.ServeHTTP(w, r)
 	})
 
@@ -129,7 +127,7 @@ func (s *Server) routes() {
 	s.mux = http.NewServeMux()
 	s.mux.HandleFunc("/.well-known/openid-configuration", s.openIDConfiguration)
 	s.mux.HandleFunc("/auth", s.openIDAuth)
-	s.mux.HandleFunc("/auth/login", s.openIDAuthLogin)
+	s.mux.HandleFunc("/auth/login", s.authLogin)
 	s.mux.HandleFunc("/token", s.openIDToken)
 	s.mux.HandleFunc("/keys", s.openIDKeys)
 
@@ -236,8 +234,8 @@ func (s *Server) createKey() error {
 	return nil
 }
 
-func (s *Server) AddAuthenticator(name string, f func(req *Request) Response) {
-	s.authenticators[name] = f
+func (s *Server) SetAuthenticator(f func(req *Request) Response) {
+	s.authenticator = f
 }
 
 type contextKey struct{}
@@ -268,10 +266,6 @@ func (c *Client) AddAllowedRedirectURIs(names ...string) {
 
 func (c *Client) AddAllowedScopes(names ...string) {
 	c.allowedScopes = append(c.allowedScopes, names...)
-}
-
-func (c *Client) AddAllowedAuthenticators(names ...string) {
-	c.allowedAuthenticators = append(c.allowedAuthenticators, names...)
 }
 
 // AddAllowedRoles adds one or more roles to the list of the

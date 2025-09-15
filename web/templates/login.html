@@ -1,31 +1,31 @@
 {{ template "header.html" . }}
-{{ $UsernamePrompt := "User ID" }}
-{{- if .UsernamePrompt }}{{ $UsernamePrompt = .UsernamePrompt }}{{ end }}
+{{ $LoginPrompt := "User ID" }}
+{{- if .loginPrompt }}{{ $LoginPrompt = .loginPrompt }}{{ end }}
     <div class="panel login">
       <h2 class="heading">Log in to Your Account</h2>
-      <form method="post" action="{{ .PostURL }}">
+      <form method="post" action="{{ .postURL }}">
         <div class="form-row">
           <div class="form-label">
-            <label for="userid">{{ $UsernamePrompt }}</label>
+            <label for="userid">{{ $LoginPrompt }}</label>
           </div>
-          <input type="hidden" name="code" value="{{ .code }}">
-          <input tabindex="1" required id="login" name="login" type="text" class="form-input" placeholder="{{ $UsernamePrompt }}" {{ if .Username }} value="{{ .Username }}" {{ else }} autofocus {{ end }}/>
+          <input type="hidden" name="session" value="{{ .session }}">
+          <input tabindex="1" required id="login" name="login" type="text" class="form-input" placeholder="{{ $LoginPrompt }}" {{ if .login }} value="{{ .login }}" {{ else }} autofocus {{ end }}/>
         </div>
         <div class="form-row">
           <div class="form-label">
             <label for="password">Password</label>
           </div>
-          <input tabindex="2" required id="password" name="password" type="password" class="form-input" placeholder="password" {{ if .Invalid }} autofocus {{ end }}/>
+          <input tabindex="2" required id="password" name="password" type="password" class="form-input" placeholder="password" {{ if .loginFailed }} autofocus {{ end }}/>
         </div>
-    
-        {{ if .Invalid }}
+
+        {{ if .loginFailed }}
           <div id="login-error" class="error-box">
-            Invalid {{ $UsernamePrompt }} and password.
+            Invalid {{ $LoginPrompt }} and password.
           </div>
         {{ end }}
-    
+
         <button tabindex="3" id="submit-login" type="submit">Login</button>
-    
+
       </form>
     </div>
 {{- template "footer.html" . }}

@@ -28,7 +28,7 @@ func main() {
 	clientSecret := "client-secret"
 	s.AddClient(clientID, clientSecret)
 
-	s.AddAuthenticator("auth", func (req *jambo.Request) *jambo.Response {
+	s.SetAuthenticator(func (req *jambo.Request) *jambo.Response {
 		if req.Params["login"] == "admin" && req.Params["pass"] == "secret" {
 			return jambo.Response{
                 Type: jambo.ResponseTypeLoginOK,
@@ -88,8 +88,8 @@ which is configured to authenticate using Jambo, our OpenID Connect provider.
 - When Alice clicks "OK", Jambo redirects to the GitLab's "callback address"
 - GitLab receives the request with a "code"
 - GitLab connects to Jambo in background, sending the "code" and the "client secret".
-- Jambo replies with an _access token_ which contains a Base64-JSON-encoded object with the
-  claims (login, name, e-mail... depending on the requested scopes).
+- Jambo replies with an _access token_ which contains a BASE64 signed JSON object with the
+  claims (login, name, e-mail...) depending on the requested scopes.
 - GitLab receives the response and sends Alice the GitLab page, already authenticated.
 
 # Other OpenID Connect providers

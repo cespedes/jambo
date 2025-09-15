@@ -152,7 +152,7 @@ func (s *Server) getIDToken(conn *Connection) (jws string, err error) {
 
 	idToken := IDToken{
 		Issuer:            s.issuer,
-		SubjectIdentifier: conn.response.User,
+		SubjectIdentifier: conn.response.Login,
 		Audience:          conn.client.id,
 		Expiration:        time.Now().Unix() + 3600, // expires in 1 hour
 		IssuedAt:          time.Now().Unix(),
@@ -160,7 +160,7 @@ func (s *Server) getIDToken(conn *Connection) (jws string, err error) {
 	}
 	if slices.Contains(conn.scopes, scopeProfile) {
 		idToken.Name = conn.response.Name
-		idToken.PreferredUsername = conn.response.User
+		idToken.PreferredUsername = conn.response.Login
 	}
 	if slices.Contains(conn.scopes, scopeEmail) {
 		idToken.Email = conn.response.Mail

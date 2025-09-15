@@ -9,10 +9,10 @@ import (
 func (s *Server) template(w http.ResponseWriter, r *http.Request, name string, data map[string]string) {
 	dest := maps.Clone(data)
 
-	dest["Root"] = s.root
-	dest["Issuer"] = s.issuer
+	dest["root"] = s.root
+	dest["issuer"] = s.issuer
 	if conn := s.GetConnection(r); conn != nil && conn.client != nil {
-		dest["Client"] = conn.client.id
+		dest["client"] = conn.client.id
 	}
 
 	err := s.webTemplates.ExecuteTemplate(w, name, dest)
