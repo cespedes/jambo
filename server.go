@@ -190,9 +190,11 @@ func (s *Server) AddTemplatesFS(filesystem fs.FS) error {
 		return err
 	}
 
-	fmt.Println("# New templates")
-	for _, t := range s.webTemplates.Templates() {
-		fmt.Printf("- %s\n", t.Name())
+	if _DEBUG {
+		fmt.Println("# New templates")
+		for _, t := range s.webTemplates.Templates() {
+			fmt.Printf("- %s\n", t.Name())
+		}
 	}
 
 	return nil

@@ -117,6 +117,7 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		Session: session,
 		Client:  conn.client.id,
 		Scopes:  conn.scopes,
+		Roles:   conn.client.allowedRoles,
 	}
 	req.Params = make(map[string]string)
 	for key := range r.Form {
@@ -166,6 +167,7 @@ type Request struct {
 	Session string // unique ID for this user.
 	Client  string
 	Scopes  []string // scopes the user has requested
+	Roles   []string // list of allowed roles
 	Params  map[string]string
 }
 
@@ -184,9 +186,6 @@ type Response struct {
 
 	// e-mail address.  Used in claim "email".
 	Mail string
-
-	// Roles is used as permissions to know what clients this user can use.
-	Roles []string
 
 	// Other claims:
 	Claims map[string]any
