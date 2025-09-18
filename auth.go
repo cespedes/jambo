@@ -3,6 +3,7 @@ package jambo
 import (
 	"crypto/rand"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -133,14 +134,6 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 	s.Unlock()
 
 	switch resp.Type {
-	case ResponseTypeLoginFailed:
-		s.template(w, r, "login.html", map[string]string{
-			"postURL":     filepath.Join(s.root, "/auth/login"),
-			"session":     session,
-			"login":       resp.Login,
-			"loginFailed": "true",
-		})
-		return
 	case ResponseTypeLoginOK:
 		u, err := url.Parse(conn.redirectURI)
 		if err != nil {
@@ -151,6 +144,23 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		q.Set("state", conn.state)
 		u.RawQuery = q.Encode()
 		http.Redirect(w, r, u.String(), http.StatusFound)
+		return
+	case ResponseTypeLoginFailed:
+		s.template(w, r, "login.html", map[string]string{
+			"postURL":     filepath.Join(s.root, "/auth/login"),
+			"session":     session,
+			"login":       resp.Login,
+			"error":       resp.Error,
+			"loginFailed": "true",
+		})
+		return
+	case ResponseTypeRedirect:
+		m := map[string]string{
+			"postURL": filepath.Join(s.root, "/auth/login"),
+			"session": session,
+		}
+		maps.Copy(m, resp.Params)
+		s.template(w, r, resp.Redirect, m)
 		return
 	default:
 		s.template(w, r, "error.html", map[string]string{
@@ -173,7 +183,15 @@ type Request struct {
 
 // A Response is sent from the authenticator to the OIDC server, answering a Request.
 type Response struct {
-	Type ResponseType // the following fields depend on this type:
+	Type ResponseType
+
+	// If Type == ResponseTypeLoginFailed we can send an error to the user:
+	Error string
+
+	// If Type == ResponseTypeRedirect we need the name of the next template
+	// and the list of params that will be used to call it:
+	Redirect string
+	Params   map[string]string
 
 	// Standard claims:
 
