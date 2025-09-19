@@ -169,6 +169,9 @@ func (s *Server) getIDToken(conn *Connection) (jws string, err error) {
 		}
 	}
 
+	if len(conn.response.Claims) > 0 {
+		idToken.Claims = conn.response.Claims
+	}
 	b, err := json.Marshal(idToken)
 	if err != nil {
 		return "", err
