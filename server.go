@@ -58,6 +58,8 @@ type Server struct {
 	webStatic    fs.FS
 	webTemplates *template.Template
 
+	templateArgs map[string]string
+
 	mux     *http.ServeMux
 	key     jose.JSONWebKey
 	allKeys jose.JSONWebKeySet
@@ -198,6 +200,13 @@ func (s *Server) AddTemplatesFS(filesystem fs.FS) error {
 	}
 
 	return nil
+}
+
+func (s *Server) AddTemplateArg(key, value string) {
+	if s.templateArgs == nil {
+		s.templateArgs = make(map[string]string)
+	}
+	s.templateArgs[key] = value
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
