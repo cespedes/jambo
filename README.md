@@ -28,19 +28,19 @@ func main() {
 	clientSecret := "client-secret"
 	s.AddClient(clientID, clientSecret)
 
-	s.SetAuthenticator(func (req *jambo.Request) *jambo.Response {
-		if req.Params["login"] == "admin" && req.Params["pass"] == "secret" {
+	s.SetAuthenticator(func (req *jambo.Request) jambo.Response {
+		if req.Params["login"] == "admin" && req.Params["password"] == "secret" {
 			return jambo.Response{
-                Type: jambo.ResponseTypeLoginOK,
-                Claims: map[string]any {
-                    "login": "admin",
-                    "name": "Charlie Root",
-                },
-            }
+				Type: jambo.ResponseTypeLoginOK,
+				Login:  "admin",
+				Name:   "Charlie Root",
+				Claims: map[string]any{},
+			}
 		}
 		return jambo.Response{
-            Type: jambo.ResponseTypeLoginFailed,
-        }
+			Type: jambo.ResponseTypeLoginFailed,
+			Login: req.Params["login"],
+		}
 	})
 
 	http.ListenAndServe(":8080", s)
@@ -63,7 +63,7 @@ The OpenID Connect specification is here:
 |-------------------------------------|------------------------------------------------------------|
 | `/.well-known/openid-configuration` | OpenID Connect configuration                               |
 | `/auth`                             | HTML page to ask for credentials                           |
-| `POST /auth/request`                | to send login information (password, OTP...) to the server |
+| `POST /auth/login`                  | to send login information (password, OTP...) to the server |
 | `POST /token`                       | used by clients to send the _code_ and get _access token_  |
 | `/keys`                             | get the list of keys used to sign the tokens               |
 
