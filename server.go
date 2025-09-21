@@ -113,7 +113,9 @@ func NewServer(issuer, root string) *Server {
 	}
 
 	s.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("%s %s\n", r.Method, r.URL)
+		if _DEBUG {
+			log.Printf("%s %s\n", r.Method, r.URL)
+		}
 		s.mux.ServeHTTP(w, r)
 	})
 

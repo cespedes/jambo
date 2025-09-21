@@ -57,9 +57,11 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Printf("code=%q redirect_uri=%q client_id=%q client_secret=%q\n",
-		code, redirectURI, clientID, clientSecret)
-	fmt.Printf("state=%q nonce=%q\n", conn.state, conn.nonce)
+	if _DEBUG {
+		fmt.Printf("code=%q redirect_uri=%q client_id=%q client_secret=%q\n",
+			code, redirectURI, clientID, clientSecret)
+		fmt.Printf("state=%q nonce=%q\n", conn.state, conn.nonce)
+	}
 
 	idToken, err := s.getIDToken(&conn)
 	if err != nil {
