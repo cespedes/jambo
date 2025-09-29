@@ -17,6 +17,7 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 		code:        rand.Text(),
 		redirectURI: r.FormValue("redirect_uri"),
 		state:       r.FormValue("state"),
+		nonce:       r.FormValue("nonce"),
 		scopes:      strings.Fields(r.FormValue("scope")),
 	}
 	r = s.SetConnection(r, &conn)

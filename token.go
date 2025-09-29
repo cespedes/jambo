@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"time"
@@ -17,17 +18,44 @@ import (
 func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	grantType := r.PostFormValue("grant_type")
 	if grantType != "authorization_code" {
+		if _DEBUG {
+			log.Printf("%s POST /token: unsupported grant_type %q\n", r.RemoteAddr, grantType)
+		}
 		fmt.Fprintln(w, `{"error":"unsupported_grant_type"}`)
 		return
 	}
 	code := r.PostFormValue("code")
 	if code == "" {
+		if _DEBUG {
+			log.Printf("%s POST /token: empty code\n", r.RemoteAddr)
+		}
 		fmt.Fprintln(w, `{"error":"invalid_request","error_description":"Required param: code."}`)
 		return
 	}
 	redirectURI := r.PostFormValue("redirect_uri")
-	clientID := r.PostFormValue("client_id")
-	clientSecret := r.PostFormValue("client_secret")
+
+	// client_id and client_secret can be sent using HTTP Basic Authentication per RFC 6749, section 2.3.1
+	clientID, clientSecret, ok := r.BasicAuth()
+	if ok {
+		var err error
+		if clientID, err = url.QueryUnescape(clientID); err != nil {
+			if _DEBUG {
+				log.Printf("%s POST /token: invalid client_id\n", r.RemoteAddr)
+			}
+			fmt.Fprintln(w, `{"error":"invalid_request","error_description":"client_id improperly encoded"}`)
+			return
+		}
+		if clientSecret, err = url.QueryUnescape(clientSecret); err != nil {
+			if _DEBUG {
+				log.Printf("%s POST /token: invalid client_secret\n", r.RemoteAddr)
+			}
+			fmt.Fprintln(w, `{"error":"invalid_request","error_description":"client_secret improperly encoded"}`)
+			return
+		}
+	} else {
+		clientID = r.PostFormValue("client_id")
+		clientSecret = r.PostFormValue("client_secret")
+	}
 
 	var client *Client
 	for _, c := range s.clients {
@@ -38,6 +66,9 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if client == nil {
+		if _DEBUG {
+			log.Printf("%s POST /token: unknown client_id=%q client_secret=%q\n", r.RemoteAddr, clientID, clientSecret)
+		}
 		fmt.Fprintln(w, `{"error":"invalid_client","error_description":"Invalid client credentials."}`)
 		return
 	}
@@ -47,20 +78,19 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	s.Unlock()
 
 	if !ok {
-		log.Printf("invalid code=%q.  Connections: %v\n", code, s.connections)
+		if _DEBUG {
+			log.Printf("%s POST /token: invalid code=%q\n", r.RemoteAddr, code)
+		}
 		fmt.Fprintln(w, `{"error":"invalid_grant","error_description":"Invalid or expired code parameter."}`)
 		return
 	}
 
 	if redirectURI != conn.redirectURI {
+		if _DEBUG {
+			log.Printf("%s POST /token: invalid redirect_uri=%q\n", r.RemoteAddr, redirectURI)
+		}
 		fmt.Fprintln(w, `{"error":"invalid_request","error_description":"redirect_uri did not match URI from initial request."}`)
 		return
-	}
-
-	if _DEBUG {
-		fmt.Printf("code=%q redirect_uri=%q client_id=%q client_secret=%q\n",
-			code, redirectURI, clientID, clientSecret)
-		fmt.Printf("state=%q nonce=%q\n", conn.state, conn.nonce)
 	}
 
 	idToken, err := s.getIDToken(&conn)
@@ -122,6 +152,7 @@ func (idt IDToken) MarshalJSON() ([]byte, error) {
 	om.Set("sub", idt.SubjectIdentifier)
 	om.Set("aud", idt.Audience)
 	om.Set("exp", idt.Expiration)
+	om.Set("iat", idt.IssuedAt)
 	if idt.Nonce != "" {
 		om.Set("nonce", idt.Nonce)
 	}
