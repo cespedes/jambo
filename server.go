@@ -21,7 +21,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 )
 
-const _DEBUG = true
+const _DEBUG = false
 
 //go:embed web/static
 var _webStatic embed.FS
