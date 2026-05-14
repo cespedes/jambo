@@ -4,6 +4,7 @@ import (
 	"crypto/rsa"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-jose/go-jose/v4"
@@ -23,13 +24,16 @@ func (s *Server) userinfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	output, err := parsed.Verify(&s.key.Key.(*rsa.PrivateKey).PublicKey)
+	data, err := parsed.Verify(&s.key.Key.(*rsa.PrivateKey).PublicKey)
 	if err != nil {
 		fmt.Fprintf(w, `{"error":"access_denied","error_description2":%q}`+"\n", err.Error())
 		return
 	}
 
-	fmt.Fprintf(w, "%s\n", output)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)+1))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 
-	return
+	fmt.Fprintln(w, string(data))
 }
