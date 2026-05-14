@@ -60,12 +60,13 @@ The OpenID Connect specification is here:
 # HTTP server endpoints
 
 | endpoint                            | description
-|-------------------------------------|------------------------------------------------------------|
-| `/.well-known/openid-configuration` | OpenID Connect configuration                               |
-| `/auth`                             | HTML page to ask for credentials                           |
-| `POST /auth/login`                  | to send login information (password, OTP...) to the server |
-| `POST /token`                       | used by clients to send the _code_ and get _access token_  |
-| `/keys`                             | get the list of keys used to sign the tokens               |
+|-------------------------------------|------------------------------------------------------------------------------|
+| `/.well-known/openid-configuration` | OpenID Connect configuration                                                 |
+| `/auth`                             | HTML page to ask for credentials                                             |
+| `POST /auth/login`                  | used by end users to send login information (password, OTP...) to the server |
+| `POST /token`                       | used by clients to send the _code_ and get _id token_ and _access token_     |
+| `/keys`                             | get the list of keys used to sign the tokens                                 |
+| `/userinfo`                         | used by clients to get Claims from the access token                          |
 
 # Workflow
 
@@ -80,7 +81,7 @@ which is configured to authenticate using Jambo, our OpenID Connect provider.
 - Jambo parses a HTML template and offers it to Alice a login page (typically with a HTML form).
 - Alice fills the user and password and presses "submit".
 - The form is posted to the authentication page (https://jambo.example.com/auth/request).
-- Jambo receives the request, checks if it somes from an active session, and calls the
+- Jambo receives the request, checks if it comes from an active session, and calls the
   Authenticator function with all the parameters received from the form.
 - The Authentication function checks the parameters and returns a "Login OK".
 - Jambo optionally redirects to an approval HTML template, with a summary and a way to

@@ -1,7 +1,6 @@
 package jambo
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -99,7 +98,7 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response := map[string]string{
-		"access_token": rand.Text(), // we are not using this; any value should be OK
+		"access_token": idToken, // this is used by "/userinfo" to return the claims
 		"token_type":   "Bearer",
 		"id_token":     idToken,
 		// "expires_in": // optional

@@ -21,7 +21,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 )
 
-const _DEBUG = false
+const _DEBUG = true
 
 //go:embed web/static
 var _webStatic embed.FS
@@ -133,6 +133,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/auth", s.openIDAuth)
 	s.mux.HandleFunc("/auth/login", s.authLogin)
 	s.mux.HandleFunc("/token", s.openIDToken)
+	s.mux.HandleFunc("/userinfo", s.userinfo)
 	s.mux.HandleFunc("/keys", s.openIDKeys)
 
 	// All the files and dirs inside s.webStatic will be served as-is:

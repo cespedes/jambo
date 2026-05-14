@@ -47,13 +47,13 @@ func (s *Server) openIDConfiguration(w http.ResponseWriter, r *http.Request) {
 		AuthorizationEndpoint:             s.issuer + "/auth",
 		TokenEndpoint:                     s.issuer + "/token",
 		JwksURI:                           s.issuer + "/keys",
+		UserInfoEndpoint:                  s.issuer + "/userinfo",
 		ScopesSupported:                   scopesSupported,
 		ResponseTypesSupported:            []string{"code"},
 		GrantTypesSupported:               []string{"authorization_code"},
 		SubjectTypesSupported:             []string{"public"},
 		IDTokenSigningAlgValuesSupported:  []string{"RS256"},
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post"},
-		// UserInfoEndpoint:                 s.issuer + "/userinfo", // TODO: not implemented
 		ClaimsSupported: []string{
 			// Required claims:
 			"iss", // Issuer.
