@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-jose/go-jose/v4"
 )
 
 func newTestServer(t *testing.T) *Server {
@@ -370,5 +372,86 @@ func TestUnsupportedCodeChallengeMethodIsRejected(t *testing.T) {
 
 	if !strings.Contains(rec.Body.String(), "Unsupported code_challenge_method") {
 		t.Errorf("expected 'Unsupported code_challenge_method' error, got: %s", rec.Body.String())
+	}
+}
+
+// signTestToken signs a set of claims with the test server's own key,
+// bypassing getIDToken, so tests can craft tokens with an arbitrary "exp".
+func signTestToken(t *testing.T, s *Server, claims map[string]any) string {
+	t.Helper()
+	signer, err := jose.NewSigner(jose.SigningKey{Key: s.key, Algorithm: jose.RS256}, &jose.SignerOptions{})
+	if err != nil {
+		t.Fatalf("new signer: %v", err)
+	}
+	b, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatalf("marshal claims: %v", err)
+	}
+	sig, err := signer.Sign(b)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	tok, err := sig.CompactSerialize()
+	if err != nil {
+		t.Fatalf("serialize: %v", err)
+	}
+	return tok
+}
+
+func userinfoRequest(s *Server, token string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, "/oidc/userinfo", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestUserinfoRejectsExpiredToken(t *testing.T) {
+	s := newTestServer(t)
+	token := signTestToken(t, s, map[string]any{
+		"sub": "alice",
+		"iat": time.Now().Add(-2 * time.Hour).Unix(),
+		"exp": time.Now().Add(-time.Hour).Unix(),
+	})
+
+	rec := userinfoRequest(s, token)
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("invalid JSON response: %v (body=%s)", err, rec.Body.String())
+	}
+	if body["error"] != "access_denied" {
+		t.Errorf("expired token: error = %v, want access_denied", body["error"])
+	}
+}
+
+func TestUserinfoRejectsTokenWithoutExpiration(t *testing.T) {
+	s := newTestServer(t)
+	token := signTestToken(t, s, map[string]any{"sub": "alice"})
+
+	rec := userinfoRequest(s, token)
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("invalid JSON response: %v (body=%s)", err, rec.Body.String())
+	}
+	if body["error"] != "access_denied" {
+		t.Errorf("token without exp: error = %v, want access_denied", body["error"])
+	}
+}
+
+func TestUserinfoAcceptsUnexpiredToken(t *testing.T) {
+	s := newTestServer(t)
+	token := signTestToken(t, s, map[string]any{
+		"sub": "alice",
+		"iat": time.Now().Unix(),
+		"exp": time.Now().Add(time.Hour).Unix(),
+	})
+
+	rec := userinfoRequest(s, token)
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("invalid JSON response: %v (body=%s)", err, rec.Body.String())
+	}
+	if body["sub"] != "alice" {
+		t.Errorf("sub = %v, want %q", body["sub"], "alice")
 	}
 }
