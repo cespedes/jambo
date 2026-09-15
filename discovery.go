@@ -12,14 +12,12 @@ const (
 	scopeOpenid  = "openid"
 	scopeEmail   = "email"
 	scopeProfile = "profile"
-	scopeGroups  = "groups"
 )
 
 var scopesSupported = []string{
 	scopeOpenid,
 	scopeEmail,
 	scopeProfile,
-	scopeGroups,
 }
 
 type openidConfiguration struct {
