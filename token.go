@@ -1,6 +1,7 @@
 package jambo
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -58,7 +59,7 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 
 	var client *Client
 	for _, c := range s.clients {
-		if c.id == clientID && c.secret == clientSecret {
+		if c.id == clientID && subtle.ConstantTimeCompare([]byte(c.secret), []byte(clientSecret)) == 1 {
 			client = c
 			break
 		}

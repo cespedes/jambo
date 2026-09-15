@@ -109,8 +109,8 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 
 	if !ok {
 		s.template(w, r, "error.html", map[string]string{
-			"error_type": "Bad request",
-			"error":      fmt.Sprintf(`Invalid session %q from request`, session),
+			"errorType": "Bad request",
+			"error":     fmt.Sprintf(`Invalid session %q from request`, session),
 		})
 		return
 	}
