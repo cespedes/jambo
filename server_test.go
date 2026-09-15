@@ -1,6 +1,8 @@
 package jambo
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -36,18 +38,11 @@ func newTestServer(t *testing.T) *Server {
 
 var sessionRe = regexp.MustCompile(`name="session" value="([^"]+)"`)
 
-// startAuth drives a GET /auth request and returns the session (the
-// authorization code) embedded in the returned login form.
-func startAuth(t *testing.T, s *Server, scope string) string {
+// doAuth drives a GET /auth request with the given query parameters and
+// returns the session (the authorization code) embedded in the returned
+// login form.
+func doAuth(t *testing.T, s *Server, q url.Values) string {
 	t.Helper()
-	q := url.Values{
-		"client_id":     {"test-client"},
-		"redirect_uri":  {"http://client.example.com/callback"},
-		"response_type": {"code"},
-		"scope":         {scope},
-		"state":         {"xyz"},
-		"nonce":         {"abc123"},
-	}
 	req := httptest.NewRequest(http.MethodGet, "/oidc/auth?"+q.Encode(), nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
@@ -60,6 +55,18 @@ func startAuth(t *testing.T, s *Server, scope string) string {
 		t.Fatalf("GET /auth: could not find session in response body: %s", rec.Body.String())
 	}
 	return m[1]
+}
+
+func startAuth(t *testing.T, s *Server, scope string) string {
+	t.Helper()
+	return doAuth(t, s, url.Values{
+		"client_id":     {"test-client"},
+		"redirect_uri":  {"http://client.example.com/callback"},
+		"response_type": {"code"},
+		"scope":         {scope},
+		"state":         {"xyz"},
+		"nonce":         {"abc123"},
+	})
 }
 
 func login(t *testing.T, s *Server, session, login, password string) *http.Response {
@@ -78,10 +85,18 @@ func login(t *testing.T, s *Server, session, login, password string) *http.Respo
 
 func exchangeCode(t *testing.T, s *Server, code string) (*http.Response, map[string]any) {
 	t.Helper()
+	return exchangeCodeWithVerifier(t, s, code, "")
+}
+
+func exchangeCodeWithVerifier(t *testing.T, s *Server, code, codeVerifier string) (*http.Response, map[string]any) {
+	t.Helper()
 	form := url.Values{
 		"grant_type":   {"authorization_code"},
 		"code":         {code},
 		"redirect_uri": {"http://client.example.com/callback"},
+	}
+	if codeVerifier != "" {
+		form.Set("code_verifier", codeVerifier)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/oidc/token", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -243,5 +258,117 @@ func TestExpiredConnectionsArePurgedOnNewAuth(t *testing.T) {
 	s.Unlock()
 	if stillThere {
 		t.Error("expired connection was not purged when a new one was created")
+	}
+}
+
+func TestPKCESucceedsWithCorrectVerifier(t *testing.T) {
+	s := newTestServer(t)
+
+	codeVerifier := "a-very-random-verifier-that-is-at-least-43-characters-long"
+	sum := sha256.Sum256([]byte(codeVerifier))
+	codeChallenge := base64.RawURLEncoding.EncodeToString(sum[:])
+
+	session := doAuth(t, s, url.Values{
+		"client_id":             {"test-client"},
+		"redirect_uri":          {"http://client.example.com/callback"},
+		"response_type":         {"code"},
+		"scope":                 {"openid"},
+		"code_challenge":        {codeChallenge},
+		"code_challenge_method": {"S256"},
+	})
+
+	resp := login(t, s, session, "alice", "secret")
+	loc, _ := url.Parse(resp.Header.Get("Location"))
+	code := loc.Query().Get("code")
+	if code == "" {
+		t.Fatal("redirect did not contain a code")
+	}
+
+	tokResp, tokBody := exchangeCodeWithVerifier(t, s, code, codeVerifier)
+	if tokResp.StatusCode != http.StatusOK || tokBody["access_token"] == nil {
+		t.Fatalf("POST /token with correct code_verifier: status = %d, body = %v", tokResp.StatusCode, tokBody)
+	}
+}
+
+func TestPKCERejectsWrongVerifier(t *testing.T) {
+	s := newTestServer(t)
+
+	sum := sha256.Sum256([]byte("the-real-verifier"))
+	codeChallenge := base64.RawURLEncoding.EncodeToString(sum[:])
+
+	session := doAuth(t, s, url.Values{
+		"client_id":             {"test-client"},
+		"redirect_uri":          {"http://client.example.com/callback"},
+		"response_type":         {"code"},
+		"scope":                 {"openid"},
+		"code_challenge":        {codeChallenge},
+		"code_challenge_method": {"S256"},
+	})
+
+	resp := login(t, s, session, "alice", "secret")
+	loc, _ := url.Parse(resp.Header.Get("Location"))
+	code := loc.Query().Get("code")
+
+	_, tokBody := exchangeCodeWithVerifier(t, s, code, "not-the-real-verifier")
+	if tokBody["error"] != "invalid_grant" {
+		t.Errorf("wrong code_verifier: error = %v, want invalid_grant", tokBody["error"])
+	}
+}
+
+func TestPKCERejectsMissingVerifier(t *testing.T) {
+	s := newTestServer(t)
+
+	sum := sha256.Sum256([]byte("the-real-verifier"))
+	codeChallenge := base64.RawURLEncoding.EncodeToString(sum[:])
+
+	session := doAuth(t, s, url.Values{
+		"client_id":             {"test-client"},
+		"redirect_uri":          {"http://client.example.com/callback"},
+		"response_type":         {"code"},
+		"scope":                 {"openid"},
+		"code_challenge":        {codeChallenge},
+		"code_challenge_method": {"S256"},
+	})
+
+	resp := login(t, s, session, "alice", "secret")
+	loc, _ := url.Parse(resp.Header.Get("Location"))
+	code := loc.Query().Get("code")
+
+	_, tokBody := exchangeCode(t, s, code) // no code_verifier sent
+	if tokBody["error"] != "invalid_grant" {
+		t.Errorf("missing code_verifier: error = %v, want invalid_grant", tokBody["error"])
+	}
+}
+
+func TestAuthWithoutPKCEStillWorks(t *testing.T) {
+	// A client that never mentions PKCE gets the pre-existing behavior.
+	s := newTestServer(t)
+	session := startAuth(t, s, "openid")
+	resp := login(t, s, session, "alice", "secret")
+	loc, _ := url.Parse(resp.Header.Get("Location"))
+	code := loc.Query().Get("code")
+
+	tokResp, tokBody := exchangeCode(t, s, code)
+	if tokResp.StatusCode != http.StatusOK || tokBody["access_token"] == nil {
+		t.Fatalf("POST /token without PKCE: status = %d, body = %v", tokResp.StatusCode, tokBody)
+	}
+}
+
+func TestUnsupportedCodeChallengeMethodIsRejected(t *testing.T) {
+	s := newTestServer(t)
+	q := url.Values{
+		"client_id":             {"test-client"},
+		"redirect_uri":          {"http://client.example.com/callback"},
+		"response_type":         {"code"},
+		"scope":                 {"openid"},
+		"code_challenge":        {"whatever"},
+		"code_challenge_method": {"md5"},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/oidc/auth?"+q.Encode(), nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "Unsupported code_challenge_method") {
+		t.Errorf("expected 'Unsupported code_challenge_method' error, got: %s", rec.Body.String())
 	}
 }

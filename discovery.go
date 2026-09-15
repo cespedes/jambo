@@ -23,21 +23,22 @@ var scopesSupported = []string{
 }
 
 type openidConfiguration struct {
-	Issuer                            string   `json:"issuer"`                                // REQUIRED
-	AuthorizationEndpoint             string   `json:"authorization_endpoint"`                // REQUIRED
-	TokenEndpoint                     string   `json:"token_endpoint,omitempty"`              // REQUIRED unless only implicit flow
-	UserInfoEndpoint                  string   `json:"userinfo_endpoint,omitempty"`           // recommended
-	JwksURI                           string   `json:"jwks_uri"`                              // REQUIRED
-	RegistrationEndpoint              string   `json:"registration_endpoint,omitempty"`       // recommended
-	ScopesSupported                   []string `json:"scopes_supported,omitempty"`            // recommended
-	ResponseTypesSupported            []string `json:"response_types_supported"`              // REQUIRED
-	ResponseModesSupported            []string `json:"response_modes_supported,omitempty"`    // optional
-	GrantTypesSupported               []string `json:"grant_types_supported,omitempty"`       // optional
-	ACRValuesSupported                []string `json:"acr_values_supported,omitempty"`        // optional
-	SubjectTypesSupported             []string `json:"subject_types_supported"`               // REQUIRED
-	IDTokenSigningAlgValuesSupported  []string `json:"id_token_signing_alg_values_supported"` // REQUIRED
-	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"` // optional
-	ClaimsSupported                   []string `json:"claims_supported,omitempty"`            // recommended
+	Issuer                            string   `json:"issuer"`                                     // REQUIRED
+	AuthorizationEndpoint             string   `json:"authorization_endpoint"`                     // REQUIRED
+	TokenEndpoint                     string   `json:"token_endpoint,omitempty"`                   // REQUIRED unless only implicit flow
+	UserInfoEndpoint                  string   `json:"userinfo_endpoint,omitempty"`                // recommended
+	JwksURI                           string   `json:"jwks_uri"`                                   // REQUIRED
+	RegistrationEndpoint              string   `json:"registration_endpoint,omitempty"`            // recommended
+	ScopesSupported                   []string `json:"scopes_supported,omitempty"`                 // recommended
+	ResponseTypesSupported            []string `json:"response_types_supported"`                   // REQUIRED
+	ResponseModesSupported            []string `json:"response_modes_supported,omitempty"`         // optional
+	GrantTypesSupported               []string `json:"grant_types_supported,omitempty"`            // optional
+	ACRValuesSupported                []string `json:"acr_values_supported,omitempty"`             // optional
+	SubjectTypesSupported             []string `json:"subject_types_supported"`                    // REQUIRED
+	IDTokenSigningAlgValuesSupported  []string `json:"id_token_signing_alg_values_supported"`      // REQUIRED
+	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"`      // optional
+	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported,omitempty"` // optional
+	ClaimsSupported                   []string `json:"claims_supported,omitempty"`                 // recommended
 	// missing a lot of "optional" fields
 }
 
@@ -54,6 +55,7 @@ func (s *Server) openIDConfiguration(w http.ResponseWriter, r *http.Request) {
 		SubjectTypesSupported:             []string{"public"},
 		IDTokenSigningAlgValuesSupported:  []string{"RS256"},
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post"},
+		CodeChallengeMethodsSupported:     []string{"S256", "plain"},
 		ClaimsSupported: []string{
 			// Required claims:
 			"iss", // Issuer.

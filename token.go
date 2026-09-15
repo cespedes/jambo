@@ -1,7 +1,9 @@
 package jambo
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -100,6 +102,19 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If the client used PKCE in /auth, it must now prove it holds the
+	// code_verifier matching the code_challenge it sent there.
+	if conn.codeChallenge != "" {
+		codeVerifier := r.PostFormValue("code_verifier")
+		if !validPKCEVerifier(conn.codeChallengeMethod, conn.codeChallenge, codeVerifier) {
+			if _DEBUG {
+				log.Printf("%s POST /token: invalid code_verifier\n", r.RemoteAddr)
+			}
+			fmt.Fprintln(w, `{"error":"invalid_grant","error_description":"Invalid or missing code_verifier."}`)
+			return
+		}
+	}
+
 	idToken, err := s.getIDToken(&conn)
 	if err != nil {
 		http.Error(w, "Internal server error getting ID token.", http.StatusInternalServerError)
@@ -132,6 +147,23 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Pragma", "no-cache")
 
 	fmt.Fprintln(w, string(data))
+}
+
+// validPKCEVerifier checks a PKCE code_verifier (RFC 7636 section 4.6)
+// against the code_challenge stored for the connection.
+func validPKCEVerifier(method, challenge, verifier string) bool {
+	if verifier == "" {
+		return false
+	}
+	var computed string
+	switch method {
+	case "S256":
+		h := sha256.Sum256([]byte(verifier))
+		computed = base64.RawURLEncoding.EncodeToString(h[:])
+	default: // "plain"
+		computed = verifier
+	}
+	return subtle.ConstantTimeCompare([]byte(computed), []byte(challenge)) == 1
 }
 
 // https://openid.net/specs/openid-connect-core-1_0.html#rfc.section.2

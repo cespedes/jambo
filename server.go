@@ -53,6 +53,11 @@ type Connection struct {
 	nonce       string
 	scopes      []string
 	response    Response // last response from the authenticator
+
+	// PKCE (RFC 7636), optional: set only if the client sent a
+	// code_challenge to /auth. codeChallengeMethod is "S256" or "plain".
+	codeChallenge       string
+	codeChallengeMethod string
 }
 
 // expired reports whether conn is older than connectionTTL.

@@ -15,12 +15,14 @@ import (
 // openIDAuth is the handler for the Authorization endpoint ("/auth")
 func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 	conn := Connection{
-		code:        rand.Text(),
-		created:     time.Now(),
-		redirectURI: r.FormValue("redirect_uri"),
-		state:       r.FormValue("state"),
-		nonce:       r.FormValue("nonce"),
-		scopes:      strings.Fields(r.FormValue("scope")),
+		code:                rand.Text(),
+		created:             time.Now(),
+		redirectURI:         r.FormValue("redirect_uri"),
+		state:               r.FormValue("state"),
+		nonce:               r.FormValue("nonce"),
+		scopes:              strings.Fields(r.FormValue("scope")),
+		codeChallenge:       r.FormValue("code_challenge"),
+		codeChallengeMethod: r.FormValue("code_challenge_method"),
 	}
 	r = s.SetConnection(r, &conn)
 
@@ -80,6 +82,23 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 			"error": fmt.Sprintf(`Unregistered redirect_uri ("%s")`, conn.redirectURI),
 		})
 		return
+	}
+
+	// PKCE (RFC 7636) is optional: a client that does not send a
+	// code_challenge gets the flow as before. A client that does send one
+	// must use a method we support; the actual verifier is checked later,
+	// in openIDToken.
+	if conn.codeChallenge != "" {
+		if conn.codeChallengeMethod == "" {
+			conn.codeChallengeMethod = "plain"
+		}
+		if conn.codeChallengeMethod != "S256" && conn.codeChallengeMethod != "plain" {
+			s.template(w, r, "error.html", map[string]string{
+				"errorType": "Bad request",
+				"error":     fmt.Sprintf(`Unsupported code_challenge_method: %q`, conn.codeChallengeMethod),
+			})
+			return
+		}
 	}
 
 	s.Lock()
