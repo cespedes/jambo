@@ -16,12 +16,19 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cespedes/jambo/mergefs"
 	"github.com/go-jose/go-jose/v4"
 )
 
 const _DEBUG = false
+
+// connectionTTL is how long a pending connection (an in-progress
+// authentication, identified by its code) is kept around before being
+// considered expired and purged. This bounds the memory used by
+// abandoned logins and by codes nobody ever redeemed.
+const connectionTTL = 10 * time.Minute
 
 //go:embed web/static
 var _webStatic embed.FS
@@ -39,12 +46,28 @@ type Client struct {
 
 type Connection struct {
 	code        string
+	created     time.Time // used to expire stale, unredeemed connections
 	client      *Client
 	redirectURI string
 	state       string
 	nonce       string
 	scopes      []string
 	response    Response // last response from the authenticator
+}
+
+// expired reports whether conn is older than connectionTTL.
+func (conn Connection) expired() bool {
+	return time.Since(conn.created) > connectionTTL
+}
+
+// purgeExpiredConnections removes connections older than connectionTTL.
+// Callers must hold s.Mutex.
+func (s *Server) purgeExpiredConnections() {
+	for code, conn := range s.connections {
+		if conn.expired() {
+			delete(s.connections, code)
+		}
+	}
 }
 
 type Server struct {

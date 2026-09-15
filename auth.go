@@ -9,12 +9,14 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
 
 // openIDAuth is the handler for the Authorization endpoint ("/auth")
 func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 	conn := Connection{
 		code:        rand.Text(),
+		created:     time.Now(),
 		redirectURI: r.FormValue("redirect_uri"),
 		state:       r.FormValue("state"),
 		nonce:       r.FormValue("nonce"),
@@ -81,6 +83,7 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.Lock()
+	s.purgeExpiredConnections()
 	s.connections[conn.code] = conn
 	s.Unlock()
 
@@ -105,6 +108,10 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 
 	s.Lock()
 	conn, ok := s.connections[session]
+	if ok && conn.expired() {
+		delete(s.connections, session)
+		ok = false
+	}
 	s.Unlock()
 
 	if !ok {

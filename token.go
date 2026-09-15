@@ -78,6 +78,9 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		// An authorization code MUST NOT be used more than once (RFC 6749, section 4.1.2).
 		delete(s.connections, code)
+		if conn.expired() {
+			ok = false
+		}
 	}
 	s.Unlock()
 
