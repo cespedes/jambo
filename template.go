@@ -22,7 +22,7 @@ func (s *Server) template(w http.ResponseWriter, r *http.Request, name string, d
 		http.Error(w, fmt.Sprintf("Error in template(%s): %v", name, err.Error()), http.StatusInternalServerError)
 	}
 
-	if _DEBUG {
+	if s.debug {
 		fmt.Fprintf(w, "\n<!--\n%v\n-->\n", dest)
 	}
 }

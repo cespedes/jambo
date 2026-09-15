@@ -22,8 +22,6 @@ import (
 	"github.com/go-jose/go-jose/v4"
 )
 
-const _DEBUG = false
-
 // connectionTTL is how long a pending connection (an in-progress
 // authentication, identified by its code) is kept around before being
 // considered expired and purged. This bounds the memory used by
@@ -92,9 +90,18 @@ type Server struct {
 	key     jose.JSONWebKey
 	allKeys jose.JSONWebKeySet
 
+	debug bool // set via SetDebug; logs extra diagnostics when true
+
 	sync.Mutex  // to access clients and connections
 	clients     []*Client
 	connections map[string]Connection
+}
+
+// SetDebug enables or disables extra diagnostic logging, such as
+// incoming requests and the reasons behind auth/token errors. It can
+// be called at any time and takes effect on the next log line.
+func (s *Server) SetDebug(enabled bool) {
+	s.debug = enabled
 }
 
 func NewServer(issuer, root string) *Server {
@@ -114,34 +121,14 @@ func NewServer(issuer, root string) *Server {
 		log.Fatal(err)
 	}
 
-	if _DEBUG {
-		fmt.Println("# Static files")
-		fs.WalkDir(s.webStatic, ".", fs.WalkDirFunc(func(path string, d fs.DirEntry, err error) error {
-			if d.IsDir() {
-				fmt.Print("D")
-			} else {
-				fmt.Print("-")
-			}
-			fmt.Printf(" %s\n", path)
-			return nil
-		}))
-	}
-
 	s.webTemplates, err = template.ParseFS(_webTemplates, "web/templates/*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 		return nil
 	}
 
-	if _DEBUG {
-		fmt.Println("# Templates")
-		for _, t := range s.webTemplates.Templates() {
-			fmt.Printf("- %s\n", t.Name())
-		}
-	}
-
 	s.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _DEBUG {
+		if s.debug {
 			log.Printf("%s %s %s\n", r.RemoteAddr, r.Method, r.URL)
 		}
 		s.mux.ServeHTTP(w, r)
@@ -223,7 +210,7 @@ func (s *Server) AddTemplatesFS(filesystem fs.FS) error {
 		return err
 	}
 
-	if _DEBUG {
+	if s.debug {
 		fmt.Println("# New templates")
 		for _, t := range s.webTemplates.Templates() {
 			fmt.Printf("- %s\n", t.Name())

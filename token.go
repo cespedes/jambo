@@ -20,7 +20,7 @@ import (
 func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	grantType := r.PostFormValue("grant_type")
 	if grantType != "authorization_code" {
-		if _DEBUG {
+		if s.debug {
 			log.Printf("%s POST /token: unsupported grant_type %q\n", r.RemoteAddr, grantType)
 		}
 		fmt.Fprintln(w, `{"error":"unsupported_grant_type"}`)
@@ -28,7 +28,7 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	}
 	code := r.PostFormValue("code")
 	if code == "" {
-		if _DEBUG {
+		if s.debug {
 			log.Printf("%s POST /token: empty code\n", r.RemoteAddr)
 		}
 		fmt.Fprintln(w, `{"error":"invalid_request","error_description":"Required param: code."}`)
@@ -41,14 +41,14 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		var err error
 		if clientID, err = url.QueryUnescape(clientID); err != nil {
-			if _DEBUG {
+			if s.debug {
 				log.Printf("%s POST /token: invalid client_id\n", r.RemoteAddr)
 			}
 			fmt.Fprintln(w, `{"error":"invalid_request","error_description":"client_id improperly encoded"}`)
 			return
 		}
 		if clientSecret, err = url.QueryUnescape(clientSecret); err != nil {
-			if _DEBUG {
+			if s.debug {
 				log.Printf("%s POST /token: invalid client_secret\n", r.RemoteAddr)
 			}
 			fmt.Fprintln(w, `{"error":"invalid_request","error_description":"client_secret improperly encoded"}`)
@@ -68,7 +68,7 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if client == nil {
-		if _DEBUG {
+		if s.debug {
 			log.Printf("%s POST /token: unknown client_id=%q client_secret=%q\n", r.RemoteAddr, clientID, clientSecret)
 		}
 		fmt.Fprintln(w, `{"error":"invalid_client","error_description":"Invalid client credentials."}`)
@@ -87,7 +87,7 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	s.Unlock()
 
 	if !ok {
-		if _DEBUG {
+		if s.debug {
 			log.Printf("%s POST /token: invalid code=%q\n", r.RemoteAddr, code)
 		}
 		fmt.Fprintln(w, `{"error":"invalid_grant","error_description":"Invalid or expired code parameter."}`)
@@ -95,7 +95,7 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if redirectURI != conn.redirectURI {
-		if _DEBUG {
+		if s.debug {
 			log.Printf("%s POST /token: invalid redirect_uri=%q\n", r.RemoteAddr, redirectURI)
 		}
 		fmt.Fprintln(w, `{"error":"invalid_request","error_description":"redirect_uri did not match URI from initial request."}`)
@@ -107,7 +107,7 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	if conn.codeChallenge != "" {
 		codeVerifier := r.PostFormValue("code_verifier")
 		if !validPKCEVerifier(conn.codeChallengeMethod, conn.codeChallenge, codeVerifier) {
-			if _DEBUG {
+			if s.debug {
 				log.Printf("%s POST /token: invalid code_verifier\n", r.RemoteAddr)
 			}
 			fmt.Fprintln(w, `{"error":"invalid_grant","error_description":"Invalid or missing code_verifier."}`)

@@ -455,3 +455,34 @@ func TestUserinfoAcceptsUnexpiredToken(t *testing.T) {
 		t.Errorf("sub = %v, want %q", body["sub"], "alice")
 	}
 }
+
+func TestSetDebugTogglesTemplateComment(t *testing.T) {
+	s := newTestServer(t)
+
+	authBody := func() string {
+		q := url.Values{
+			"client_id":     {"test-client"},
+			"redirect_uri":  {"http://client.example.com/callback"},
+			"response_type": {"code"},
+			"scope":         {"openid"},
+		}
+		req := httptest.NewRequest(http.MethodGet, "/oidc/auth?"+q.Encode(), nil)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		return rec.Body.String()
+	}
+
+	if strings.Contains(authBody(), "<!--") {
+		t.Fatal("debug HTML comment present before SetDebug was ever called")
+	}
+
+	s.SetDebug(true)
+	if !strings.Contains(authBody(), "<!--") {
+		t.Error("expected a debug HTML comment after SetDebug(true)")
+	}
+
+	s.SetDebug(false)
+	if strings.Contains(authBody(), "<!--") {
+		t.Error("expected no debug HTML comment after SetDebug(false)")
+	}
+}
