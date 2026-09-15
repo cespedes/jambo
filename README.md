@@ -26,7 +26,8 @@ func main() {
 
 	clientID := "test-client"
 	clientSecret := "client-secret"
-	s.AddClient(clientID, clientSecret)
+	client := s.NewClient(clientID, clientSecret)
+	client.AddAllowedRedirectURIs("https://example.com/callback")
 
 	s.SetAuthenticator(func (req *jambo.Request) jambo.Response {
 		if req.Params["login"] == "admin" && req.Params["password"] == "secret" {

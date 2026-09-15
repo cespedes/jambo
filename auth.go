@@ -139,6 +139,7 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		u, err := url.Parse(conn.redirectURI)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("redirect_uri: %v", err), http.StatusBadRequest)
+			return
 		}
 		q := u.Query()
 		q.Set("code", conn.code)
