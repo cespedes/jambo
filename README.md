@@ -65,9 +65,13 @@ The OpenID Connect specification is here:
 | `/.well-known/openid-configuration` | OpenID Connect configuration                                                 |
 | `/auth`                             | HTML page to ask for credentials                                             |
 | `POST /auth/login`                  | used by end users to send login information (password, OTP...) to the server |
-| `POST /token`                       | used by clients to send the _code_ and get _id token_ and _access token_     |
+| `POST /token`                       | used by clients to send the _code_ (or a _refresh token_) and get _id token_ and _access token_ |
 | `/keys`                             | get the list of keys used to sign the tokens                                 |
 | `/userinfo`                         | used by clients to get Claims from the access token                          |
+| `/.well-known/ssf-configuration`    | Shared Signals Framework (SSF) transmitter configuration                     |
+| `/ssf/stream`                       | SSF stream management: create/read/update/delete (POST/GET/PATCH/PUT/DELETE) |
+| `/ssf/status`, `/ssf/subjects:add`, `/ssf/subjects:remove`, `/ssf/verify` | rest of the SSF stream management API |
+| `POST /ssf/poll/{stream_id}`        | poll delivery: receivers pull pending Security Event Tokens from here        |
 
 # Workflow
 
@@ -93,6 +97,53 @@ which is configured to authenticate using Jambo, our OpenID Connect provider.
 - Jambo replies with an _access token_ which contains a BASE64 signed JSON object with the
   claims (login, name, e-mail...) depending on the requested scopes.
 - GitLab receives the response and sends Alice the GitLab page, already authenticated.
+
+# Shared Signals Framework (SSF)
+
+Jambo can also act as an SSF transmitter (OpenID Shared Signals Framework
+1.0), so a receiver such as Apple Business Manager can subscribe to
+security events (e.g. "a session was revoked") instead of, or in addition
+to, doing SSO through it. This is what Apple Business Manager's
+federated-authentication setup requires when it asks for an "SSF
+configuration URL" and the `ssf.manage`/`ssf.read` scopes.
+
+To wire it up:
+
+```go
+client := s.NewClient(clientID, clientSecret)
+client.AddAllowedScopes("offline_access", "ssf.manage", "ssf.read")
+client.AddSSFEventsSupported(jambo.EventCAEPSessionRevoked, jambo.EventCAEPCredentialChange)
+```
+
+- `offline_access` makes `/token` also return a refresh token, so the
+  receiver can keep calling the SSF management API long after the user's
+  session ends (a standard OAuth2 `grant_type=refresh_token` flow, not
+  SSF-specific).
+- `AddSSFEventsSupported` declares which event types this client's
+  streams may ever receive; a receiver requests a subset of these when it
+  creates a stream through the `/ssf/stream` management API.
+
+The receiver creates and manages its own stream (delivered by push or
+poll, its choice) using an OAuth access token obtained through the normal
+authorization code flow. To actually notify it of something, call:
+
+```go
+s.EmitSecurityEvent(clientID, jambo.EventCAEPSessionRevoked, jambo.Subject{
+	Format: jambo.SubjectFormatEmail,
+	Email:  "alice@example.com",
+}, nil)
+```
+
+which signs a Security Event Token and delivers it to every enabled
+stream of that client that requested the event type and has that subject
+registered.
+
+Refresh tokens and SSF streams (unlike the short-lived login state used
+during SSO) are meant to outlive a process restart. Jambo keeps them in
+memory by default (`MemoryStorage`), which is fine for development but
+loses everything on restart; a production deployment should implement the
+small [`Storage`](storage.go) interface against its own datastore and
+install it with `Server.SetStorage` before serving traffic.
 
 # Other OpenID Connect providers
 

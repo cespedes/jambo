@@ -49,7 +49,7 @@ func (s *Server) openIDConfiguration(w http.ResponseWriter, r *http.Request) {
 		UserInfoEndpoint:                  s.issuer + "/userinfo",
 		ScopesSupported:                   scopesSupported,
 		ResponseTypesSupported:            []string{"code"},
-		GrantTypesSupported:               []string{"authorization_code"},
+		GrantTypesSupported:               []string{"authorization_code", "refresh_token"},
 		SubjectTypesSupported:             []string{"public"},
 		IDTokenSigningAlgValuesSupported:  []string{"RS256"},
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post"},

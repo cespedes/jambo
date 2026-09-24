@@ -1,15 +1,12 @@
 package jambo
 
 import (
-	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/go-jose/go-jose/v4"
 )
 
 func (s *Server) userinfo(w http.ResponseWriter, r *http.Request) {
@@ -20,15 +17,9 @@ func (s *Server) userinfo(w http.ResponseWriter, r *http.Request) {
 	}
 	token := fields[1]
 
-	parsed, err := jose.ParseSigned(token, []jose.SignatureAlgorithm{jose.RS256})
+	data, err := s.verifySignedToken(token)
 	if err != nil {
-		fmt.Fprintf(w, `{"error":"access_denied","error_description1":%q}`+"\n", err.Error())
-		return
-	}
-
-	data, err := parsed.Verify(&s.key.Key.(*rsa.PrivateKey).PublicKey)
-	if err != nil {
-		fmt.Fprintf(w, `{"error":"access_denied","error_description2":%q}`+"\n", err.Error())
+		fmt.Fprintf(w, `{"error":"access_denied","error_description":%q}`+"\n", err.Error())
 		return
 	}
 

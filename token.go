@@ -1,6 +1,8 @@
 package jambo
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -11,21 +13,66 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/iancoleman/orderedmap"
 )
 
+// RefreshToken is the state kept for a refresh token issued when a client
+// requests the "offline_access" scope (which it must first be granted via
+// Client.AddAllowedScopes). It is persisted through Server's Storage,
+// since -- unlike the short-lived authorization code -- it is meant to
+// outlive a single login and, often, a process restart.
+type RefreshToken struct {
+	Token    string
+	ClientID string
+	Scopes   []string
+	Response Response // carries the login/name/mail/claims to reissue tokens from
+}
+
 func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
-	grantType := r.PostFormValue("grant_type")
-	if grantType != "authorization_code" {
+	switch r.PostFormValue("grant_type") {
+	case "authorization_code":
+		s.tokenAuthorizationCode(w, r)
+	case "refresh_token":
+		s.tokenRefreshToken(w, r)
+	default:
 		if s.debug {
-			log.Printf("%s POST /token: unsupported grant_type %q\n", r.RemoteAddr, grantType)
+			log.Printf("%s POST /token: unsupported grant_type %q\n", r.RemoteAddr, r.PostFormValue("grant_type"))
 		}
 		fmt.Fprintln(w, `{"error":"unsupported_grant_type"}`)
-		return
 	}
+}
+
+// authenticateClient authenticates the client making a /token request,
+// either via HTTP Basic Authentication (RFC 6749 section 2.3.1) or via
+// client_id/client_secret form parameters.
+func (s *Server) authenticateClient(r *http.Request) (*Client, error) {
+	clientID, clientSecret, ok := r.BasicAuth()
+	if ok {
+		var err error
+		if clientID, err = url.QueryUnescape(clientID); err != nil {
+			return nil, fmt.Errorf("client_id improperly encoded")
+		}
+		if clientSecret, err = url.QueryUnescape(clientSecret); err != nil {
+			return nil, fmt.Errorf("client_secret improperly encoded")
+		}
+	} else {
+		clientID = r.PostFormValue("client_id")
+		clientSecret = r.PostFormValue("client_secret")
+	}
+
+	for _, c := range s.clients {
+		if c.id == clientID && subtle.ConstantTimeCompare([]byte(c.secret), []byte(clientSecret)) == 1 {
+			return c, nil
+		}
+	}
+	return nil, fmt.Errorf("invalid client credentials")
+}
+
+func (s *Server) tokenAuthorizationCode(w http.ResponseWriter, r *http.Request) {
 	code := r.PostFormValue("code")
 	if code == "" {
 		if s.debug {
@@ -36,40 +83,10 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	}
 	redirectURI := r.PostFormValue("redirect_uri")
 
-	// client_id and client_secret can be sent using HTTP Basic Authentication per RFC 6749, section 2.3.1
-	clientID, clientSecret, ok := r.BasicAuth()
-	if ok {
-		var err error
-		if clientID, err = url.QueryUnescape(clientID); err != nil {
-			if s.debug {
-				log.Printf("%s POST /token: invalid client_id\n", r.RemoteAddr)
-			}
-			fmt.Fprintln(w, `{"error":"invalid_request","error_description":"client_id improperly encoded"}`)
-			return
-		}
-		if clientSecret, err = url.QueryUnescape(clientSecret); err != nil {
-			if s.debug {
-				log.Printf("%s POST /token: invalid client_secret\n", r.RemoteAddr)
-			}
-			fmt.Fprintln(w, `{"error":"invalid_request","error_description":"client_secret improperly encoded"}`)
-			return
-		}
-	} else {
-		clientID = r.PostFormValue("client_id")
-		clientSecret = r.PostFormValue("client_secret")
-	}
-
-	var client *Client
-	for _, c := range s.clients {
-		if c.id == clientID && subtle.ConstantTimeCompare([]byte(c.secret), []byte(clientSecret)) == 1 {
-			client = c
-			break
-		}
-	}
-
-	if client == nil {
+	client, err := s.authenticateClient(r)
+	if err != nil {
 		if s.debug {
-			log.Printf("%s POST /token: unknown client_id=%q client_secret=%q\n", r.RemoteAddr, clientID, clientSecret)
+			log.Printf("%s POST /token: %v\n", r.RemoteAddr, err)
 		}
 		fmt.Fprintln(w, `{"error":"invalid_client","error_description":"Invalid client credentials."}`)
 		return
@@ -124,9 +141,21 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 		"access_token": idToken, // this is used by "/userinfo" to return the claims
 		"token_type":   "Bearer",
 		"id_token":     idToken,
+		"scope":        strings.Join(conn.scopes, " "),
 		// "expires_in": // optional
-		// "refresh_token": // optional
-		// "scope": // optional
+	}
+
+	// A client that requested (and is allowed) the "offline_access" scope
+	// gets a refresh token it can later redeem via grant_type=refresh_token,
+	// without the user being present.
+	if slices.Contains(conn.scopes, "offline_access") {
+		refreshToken := rand.Text()
+		rt := RefreshToken{Token: refreshToken, ClientID: client.id, Scopes: conn.scopes, Response: conn.response}
+		if err := s.storage.SaveRefreshToken(rt); err != nil {
+			http.Error(w, "Internal server error saving refresh token.", http.StatusInternalServerError)
+			return
+		}
+		response["refresh_token"] = refreshToken
 	}
 
 	data, err := json.MarshalIndent(response, "", "  ")
@@ -174,6 +203,7 @@ type IDToken struct {
 	Audience          string `json:"aud"`
 	Expiration        int64  `json:"exp"`
 	IssuedAt          int64  `json:"iat"`
+	Scope             string `json:"scope,omitempty"`
 	Nonce             string `json:"nonce,omitempty"`
 	PreferredUsername string `json:"preferred_username,omitempty"`
 	Name              string `json:"name,omitempty"`
@@ -192,6 +222,9 @@ func (idt IDToken) MarshalJSON() ([]byte, error) {
 	om.Set("aud", idt.Audience)
 	om.Set("exp", idt.Expiration)
 	om.Set("iat", idt.IssuedAt)
+	if idt.Scope != "" {
+		om.Set("scope", idt.Scope)
+	}
 	if idt.Nonce != "" {
 		om.Set("nonce", idt.Nonce)
 	}
@@ -215,6 +248,14 @@ func (idt IDToken) MarshalJSON() ([]byte, error) {
 }
 
 func (s *Server) getIDToken(conn *Connection) (jws string, err error) {
+	return s.signToken(conn.client.id, conn.scopes, conn.nonce, conn.response)
+}
+
+// signToken builds and signs an ID/access token (they are the same JWS:
+// see the comment on "access_token" in tokenAuthorizationCode) for the
+// given client, granted scopes, OIDC nonce (empty outside the initial
+// authorization_code exchange) and authenticator response.
+func (s *Server) signToken(clientID string, scopes []string, nonce string, resp Response) (jws string, err error) {
 	signingKey := jose.SigningKey{Key: s.key, Algorithm: jose.RS256}
 
 	signer, err := jose.NewSigner(signingKey, &jose.SignerOptions{})
@@ -224,25 +265,26 @@ func (s *Server) getIDToken(conn *Connection) (jws string, err error) {
 
 	idToken := IDToken{
 		Issuer:            s.issuer,
-		SubjectIdentifier: conn.response.Login,
-		Audience:          conn.client.id,
+		SubjectIdentifier: resp.Login,
+		Audience:          clientID,
 		Expiration:        time.Now().Unix() + 3600, // expires in 1 hour
 		IssuedAt:          time.Now().Unix(),
-		Nonce:             conn.nonce,
+		Scope:             strings.Join(scopes, " "),
+		Nonce:             nonce,
 	}
-	if slices.Contains(conn.scopes, scopeProfile) {
-		idToken.Name = conn.response.Name
-		idToken.PreferredUsername = conn.response.Login
+	if slices.Contains(scopes, scopeProfile) {
+		idToken.Name = resp.Name
+		idToken.PreferredUsername = resp.Login
 	}
-	if slices.Contains(conn.scopes, scopeEmail) {
-		idToken.Email = conn.response.Mail
+	if slices.Contains(scopes, scopeEmail) {
+		idToken.Email = resp.Mail
 		if idToken.Email != "" {
 			idToken.EmailVerified = true
 		}
 	}
 
-	if len(conn.response.Claims) > 0 {
-		idToken.Claims = conn.response.Claims
+	if len(resp.Claims) > 0 {
+		idToken.Claims = resp.Claims
 	}
 	b, err := json.Marshal(idToken)
 	if err != nil {
@@ -254,4 +296,95 @@ func (s *Server) getIDToken(conn *Connection) (jws string, err error) {
 		return "", fmt.Errorf("signing payload: %v", err)
 	}
 	return signature.CompactSerialize()
+}
+
+// verifySignedToken parses and verifies a compact JWS previously issued by
+// this Server (an ID/access token or a Security Event Token), returning
+// its raw, still-JSON-encoded claims.
+func (s *Server) verifySignedToken(token string) ([]byte, error) {
+	parsed, err := jose.ParseSigned(token, []jose.SignatureAlgorithm{jose.RS256})
+	if err != nil {
+		return nil, err
+	}
+	return parsed.Verify(&s.key.Key.(*rsa.PrivateKey).PublicKey)
+}
+
+// tokenRefreshToken handles "grant_type=refresh_token" at /token (RFC 6749
+// section 6). The refresh token is rotated: redeeming it invalidates it
+// and returns a new one.
+func (s *Server) tokenRefreshToken(w http.ResponseWriter, r *http.Request) {
+	client, err := s.authenticateClient(r)
+	if err != nil {
+		if s.debug {
+			log.Printf("%s POST /token: %v\n", r.RemoteAddr, err)
+		}
+		fmt.Fprintln(w, `{"error":"invalid_client","error_description":"Invalid client credentials."}`)
+		return
+	}
+
+	refreshToken := r.PostFormValue("refresh_token")
+	if refreshToken == "" {
+		fmt.Fprintln(w, `{"error":"invalid_request","error_description":"Required param: refresh_token."}`)
+		return
+	}
+
+	rt, ok, err := s.storage.GetRefreshToken(refreshToken)
+	if err != nil {
+		http.Error(w, "Internal server error reading refresh token.", http.StatusInternalServerError)
+		return
+	}
+	if !ok || rt.ClientID != client.id {
+		if s.debug {
+			log.Printf("%s POST /token: invalid refresh_token\n", r.RemoteAddr)
+		}
+		fmt.Fprintln(w, `{"error":"invalid_grant","error_description":"Invalid refresh token."}`)
+		return
+	}
+	// A refresh token MUST NOT be usable more than once (RFC 6749 section 10.4).
+	if err := s.storage.DeleteRefreshToken(refreshToken); err != nil {
+		http.Error(w, "Internal server error invalidating refresh token.", http.StatusInternalServerError)
+		return
+	}
+
+	scopes := rt.Scopes
+	if requested := r.PostFormValue("scope"); requested != "" {
+		requestedScopes := strings.Fields(requested)
+		for _, sc := range requestedScopes {
+			if !slices.Contains(rt.Scopes, sc) {
+				fmt.Fprintln(w, `{"error":"invalid_scope","error_description":"Requested scope exceeds the scope granted to the refresh token."}`)
+				return
+			}
+		}
+		scopes = requestedScopes
+	}
+
+	idToken, err := s.signToken(client.id, scopes, "", rt.Response)
+	if err != nil {
+		http.Error(w, "Internal server error getting ID token.", http.StatusInternalServerError)
+		return
+	}
+
+	newRefreshToken := rand.Text()
+	if err := s.storage.SaveRefreshToken(RefreshToken{Token: newRefreshToken, ClientID: client.id, Scopes: scopes, Response: rt.Response}); err != nil {
+		http.Error(w, "Internal server error saving refresh token.", http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]string{
+		"access_token":  idToken,
+		"token_type":    "Bearer",
+		"id_token":      idToken,
+		"refresh_token": newRefreshToken,
+		"scope":         strings.Join(scopes, " "),
+	}
+	data, err := json.MarshalIndent(response, "", "  ")
+	if err != nil {
+		http.Error(w, "Internal server error marshaling token response.", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)+1))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	fmt.Fprintln(w, string(data))
 }

@@ -40,6 +40,7 @@ type Client struct {
 	allowedRedirectURIs []string
 	allowedScopes       []string // allowed extra scopes
 	allowedRoles        []string // if empty, any user is allowed
+	ssfEventsSupported  []string // Shared Signals Framework event type URIs this client's streams may receive
 }
 
 type Connection struct {
@@ -92,6 +93,9 @@ type Server struct {
 
 	debug bool // set via SetDebug; logs extra diagnostics when true
 
+	storage              Storage // set via SetStorage; defaults to an in-memory Storage
+	allowInsecureSSFPush bool    // set via SetSSFAllowPrivatePush; disables the SSRF guard on SSF push endpoint_url
+
 	sync.Mutex  // to access clients and connections
 	clients     []*Client
 	connections map[string]Connection
@@ -102,6 +106,32 @@ type Server struct {
 // be called at any time and takes effect on the next log line.
 func (s *Server) SetDebug(enabled bool) {
 	s.debug = enabled
+}
+
+// SetStorage installs the Storage used to persist refresh tokens and SSF
+// streams. It replaces the default MemoryStorage installed by NewServer.
+// Call it before the Server starts handling requests.
+func (s *Server) SetStorage(storage Storage) {
+	s.storage = storage
+}
+
+// SetSSFAllowPrivatePush disables the SSRF guard that otherwise rejects
+// SSF push delivery endpoint_url values resolving to loopback, private or
+// link-local addresses, and the requirement that they use https. Only
+// meant for local development and tests, where a receiver's push
+// endpoint is legitimately something like http://127.0.0.1:port/.
+func (s *Server) SetSSFAllowPrivatePush(allow bool) {
+	s.allowInsecureSSFPush = allow
+}
+
+// clientByID returns the registered Client with the given id, or nil if none matches.
+func (s *Server) clientByID(id string) *Client {
+	for _, c := range s.clients {
+		if c.id == id {
+			return c
+		}
+	}
+	return nil
 }
 
 func NewServer(issuer, root string) *Server {
@@ -137,6 +167,7 @@ func NewServer(issuer, root string) *Server {
 	s.routes()
 
 	s.connections = make(map[string]Connection)
+	s.storage = NewMemoryStorage()
 
 	// fmt.Printf("Server ready at %s (root path is %s).\n", issuer, root)
 	return &s
@@ -150,6 +181,22 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/token", s.openIDToken)
 	s.mux.HandleFunc("/userinfo", s.userinfo)
 	s.mux.HandleFunc("/keys", s.openIDKeys)
+
+	// Shared Signals Framework (SSF): transmitter discovery, stream
+	// management API and poll delivery. See ssf.go, ssf_stream.go and
+	// ssf_event.go.
+	s.mux.HandleFunc("/.well-known/ssf-configuration", s.ssfConfigurationHandler)
+	s.mux.HandleFunc("POST /ssf/stream", s.ssfCreateStream)
+	s.mux.HandleFunc("GET /ssf/stream", s.ssfGetStream)
+	s.mux.HandleFunc("PATCH /ssf/stream", s.ssfUpdateStream)
+	s.mux.HandleFunc("PUT /ssf/stream", s.ssfReplaceStream)
+	s.mux.HandleFunc("DELETE /ssf/stream", s.ssfDeleteStream)
+	s.mux.HandleFunc("GET /ssf/status", s.ssfGetStatus)
+	s.mux.HandleFunc("POST /ssf/status", s.ssfSetStatus)
+	s.mux.HandleFunc("POST /ssf/subjects:add", s.ssfAddSubject)
+	s.mux.HandleFunc("POST /ssf/subjects:remove", s.ssfRemoveSubject)
+	s.mux.HandleFunc("POST /ssf/verify", s.ssfVerify)
+	s.mux.HandleFunc("POST /ssf/poll/{stream_id}", s.ssfPoll)
 
 	// All the files and dirs inside s.webStatic will be served as-is:
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
