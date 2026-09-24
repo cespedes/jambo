@@ -138,6 +138,25 @@ which signs a Security Event Token and delivers it to every enabled
 stream of that client that requested the event type and has that subject
 registered.
 
+**Trust model for `/ssf/subjects:add`:** a receiver registers which
+subjects it wants events about itself, via its own `ssf.manage`-scoped
+token -- Jambo does not check that the subject has ever actually
+authenticated through that specific client, or has any other
+relationship to it, before accepting the registration. Any client with
+`ssf.manage` can therefore ask to be notified about any subject at all.
+This is fine as long as `ssf.manage` is only ever granted, in the host
+application's own client configuration, to receivers that are themselves
+trusted with that scope of visibility (e.g. as of this writing, the only
+place this is wired up grants it to a single, IT-managed client) --
+but if a host application ever grants `ssf.manage` to more than one
+client, each of those clients can silently monitor events for subjects
+that have nothing to do with it. A host application that needs to
+prevent that has to enforce it itself (e.g. by recording which subjects
+have actually authenticated through a given client, and consulting that
+before calling `EmitSecurityEvent` or before allowing `subjects:add` to
+succeed for a subject outside that set) -- Jambo does not do this on its
+own.
+
 Refresh tokens and SSF streams (unlike the short-lived login state used
 during SSO) are meant to outlive a process restart. Jambo keeps them in
 memory by default (`MemoryStorage`), which is fine for development but

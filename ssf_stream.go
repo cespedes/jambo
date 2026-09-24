@@ -309,7 +309,11 @@ type subjectRequest struct {
 	Subject  Subject `json:"subject"`
 }
 
-// ssfAddSubject handles "POST /ssf/subjects:add".
+// ssfAddSubject handles "POST /ssf/subjects:add". It does not check that
+// req.Subject has any actual relationship to the calling client (e.g. has
+// ever authenticated through it) -- see the README's "Trust model for
+// /ssf/subjects:add" section. A host application that needs to prevent a
+// client from registering an unrelated subject must enforce that itself.
 func (s *Server) ssfAddSubject(w http.ResponseWriter, r *http.Request) {
 	clientID, err := s.requireSSFScope(r, "ssf.manage")
 	if err != nil {
