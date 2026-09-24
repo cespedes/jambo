@@ -114,12 +114,31 @@ func (s *Server) signSecurityEvent(stream Stream, eventType string, subject Subj
 // pushEvent delivers a signed SET to a push-delivery stream's endpoint,
 // retrying with exponential backoff. It runs in its own goroutine so
 // EmitSecurityEvent never blocks on a slow or unreachable receiver.
+//
+// isSafePushURL's SSRF guard runs again before every attempt (not just
+// once, when the stream was created/updated): a receiver could otherwise
+// register a public endpoint that passes validation and later DNS-rebind
+// its hostname to a private address before delivery actually happens, or
+// before a later retry. The client also refuses to follow redirects, so
+// an endpoint can't pass validation and then 302 the actual push to an
+// unvalidated internal URL.
 func (s *Server) pushEvent(stream Stream, setJWS string) {
 	go func() {
-		client := &http.Client{Timeout: 10 * time.Second}
+		client := &http.Client{
+			Timeout: 10 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
 		backoff := time.Second
 		const maxAttempts = 8
 		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			if err := isSafePushURL(stream.Delivery.EndpointURL, s.allowInsecureSSFPush); err != nil {
+				if s.debug {
+					log.Printf("SSF push to stream %s: endpoint_url no longer safe: %v\n", stream.StreamID, err)
+				}
+				return
+			}
 			req, err := http.NewRequest(http.MethodPost, stream.Delivery.EndpointURL, strings.NewReader(setJWS))
 			if err != nil {
 				if s.debug {

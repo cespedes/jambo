@@ -283,6 +283,122 @@ func TestSSFPushDelivery(t *testing.T) {
 	}
 }
 
+// TestSSFPushDoesNotFollowRedirects guards against a push endpoint that
+// passes SSRF validation and then redirects the actual delivery to an
+// unvalidated (potentially internal) URL.
+func TestSSFPushDoesNotFollowRedirects(t *testing.T) {
+	s := newSSFTestServer(t)
+	body := ssfExchangeCode(t, s, "openid ssf.manage ssf.read")
+	accessToken, _ := body["access_token"].(string)
+
+	var mu sync.Mutex
+	redirectTargetHit := false
+	redirectTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		redirectTargetHit = true
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer redirectTarget.Close()
+
+	receiverHits := 0
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		receiverHits++
+		mu.Unlock()
+		http.Redirect(w, r, redirectTarget.URL, http.StatusFound)
+	}))
+	defer receiver.Close()
+
+	status, streamResp := ssfDo(t, s, http.MethodPost, "/ssf/stream", accessToken, streamRequest{
+		Delivery:        Delivery{Method: deliveryMethodPush, EndpointURL: receiver.URL},
+		EventsRequested: []string{EventCAEPSessionRevoked},
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("POST /ssf/stream: status = %d, body = %v", status, streamResp)
+	}
+	streamID, _ := streamResp["stream_id"].(string)
+
+	subject := Subject{Format: SubjectFormatEmail, Email: "alice@example.com"}
+	if status, _ := ssfDo(t, s, http.MethodPost, "/ssf/subjects:add", accessToken, subjectRequest{StreamID: streamID, Subject: subject}); status != http.StatusNoContent {
+		t.Fatalf("POST /ssf/subjects:add: status = %d", status)
+	}
+
+	if err := s.EmitSecurityEvent(ssfClientID, EventCAEPSessionRevoked, subject, nil); err != nil {
+		t.Fatalf("EmitSecurityEvent: %v", err)
+	}
+
+	waitFor(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return receiverHits > 0
+	})
+
+	// Give a wrongly-followed redirect plenty of time to have reached
+	// redirectTarget (it would happen within the same client.Do call,
+	// so this is generous), then confirm it never did.
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if redirectTargetHit {
+		t.Error("push delivery followed a redirect to an unvalidated endpoint")
+	}
+}
+
+// TestSSFPushRevalidatesEndpointBeforeDelivery guards against a push
+// endpoint that was safe when the stream was created/updated but has
+// since become unsafe (e.g. a DNS rebind to a private address): delivery
+// must re-check isSafePushURL before every attempt, not just once at
+// stream-creation time.
+func TestSSFPushRevalidatesEndpointBeforeDelivery(t *testing.T) {
+	s := newSSFTestServer(t) // SetSSFAllowPrivatePush(true), so creating the stream below succeeds
+	body := ssfExchangeCode(t, s, "openid ssf.manage ssf.read")
+	accessToken, _ := body["access_token"].(string)
+
+	var mu sync.Mutex
+	hits := 0
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer receiver.Close()
+
+	status, streamResp := ssfDo(t, s, http.MethodPost, "/ssf/stream", accessToken, streamRequest{
+		Delivery:        Delivery{Method: deliveryMethodPush, EndpointURL: receiver.URL},
+		EventsRequested: []string{EventCAEPSessionRevoked},
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("POST /ssf/stream: status = %d, body = %v", status, streamResp)
+	}
+	streamID, _ := streamResp["stream_id"].(string)
+
+	subject := Subject{Format: SubjectFormatEmail, Email: "alice@example.com"}
+	if status, _ := ssfDo(t, s, http.MethodPost, "/ssf/subjects:add", accessToken, subjectRequest{StreamID: streamID, Subject: subject}); status != http.StatusNoContent {
+		t.Fatalf("POST /ssf/subjects:add: status = %d", status)
+	}
+
+	// receiver.URL (plain http, on 127.0.0.1) already passed validation
+	// only because SetSSFAllowPrivatePush(true) was in effect when the
+	// stream was created. Flip that off now, simulating the endpoint
+	// having become unsafe since (e.g. a DNS rebind), without touching
+	// the stream itself -- receiver is still listening, so if the guard
+	// fails to re-check at delivery time, this push would still succeed.
+	s.allowInsecureSSFPush = false
+
+	if err := s.EmitSecurityEvent(ssfClientID, EventCAEPSessionRevoked, subject, nil); err != nil {
+		t.Fatalf("EmitSecurityEvent: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if hits != 0 {
+		t.Errorf("push was delivered to an endpoint that should have failed re-validation: %d hits", hits)
+	}
+}
+
 func TestSSFPollDelivery(t *testing.T) {
 	s := newSSFTestServer(t)
 	body := ssfExchangeCode(t, s, "openid ssf.manage ssf.read")

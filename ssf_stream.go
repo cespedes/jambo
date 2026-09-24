@@ -16,10 +16,12 @@ import (
 // internal URL as its push endpoint. Server.SetSSFAllowPrivatePush(true)
 // disables this check, for local development and tests.
 //
-// This only resolves and checks the host once, when the stream is created
-// or updated; it is not re-checked before every push, so it does not
-// defend against a receiver that DNS-rebinds its endpoint host to a
-// private address afterwards.
+// It is called here, when the stream is created or updated, and again by
+// pushEvent before every delivery attempt, so a receiver that DNS-rebinds
+// its endpoint host to a private address after registering it still gets
+// rejected the next time an event is actually pushed. A malicious
+// redirect from the endpoint itself is a separate concern, guarded
+// against by pushEvent's client refusing to follow redirects at all.
 func isSafePushURL(rawURL string, allowPrivate bool) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
