@@ -166,6 +166,53 @@ func TestFullAuthorizationCodeFlow(t *testing.T) {
 	}
 }
 
+// TestCodeCannotBeRedeemedByDifferentClient guards against a code issued
+// to one client being redeemed by a different registered client (RFC 6749
+// section 4.1.3): even with the correct redirect_uri, valid credentials
+// for a *different* client must not be enough to obtain a token for a
+// code that was issued to someone else.
+func TestCodeCannotBeRedeemedByDifferentClient(t *testing.T) {
+	s := newTestServer(t)
+	other := s.NewClient("other-client", "other-secret")
+	other.AddAllowedRedirectURIs("http://client.example.com/callback")
+
+	session := startAuth(t, s, "openid profile email")
+	resp := login(t, s, session, "alice", "secret")
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("POST /auth/login: status = %d", resp.StatusCode)
+	}
+	loc, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil {
+		t.Fatalf("invalid redirect Location: %v", err)
+	}
+	code := loc.Query().Get("code")
+	if code == "" {
+		t.Fatal("redirect did not contain a code")
+	}
+
+	form := url.Values{
+		"grant_type":   {"authorization_code"},
+		"code":         {code},
+		"redirect_uri": {"http://client.example.com/callback"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oidc/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth("other-client", "other-secret")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("POST /token: invalid JSON response: %v (body=%s)", err, rec.Body.String())
+	}
+	if body["error"] != "invalid_grant" {
+		t.Errorf("redeeming test-client's code as other-client: error = %v, want invalid_grant", body["error"])
+	}
+	if _, ok := body["access_token"]; ok {
+		t.Errorf("redeeming test-client's code as other-client returned an access_token: %v", body)
+	}
+}
+
 func TestLoginFailedReRendersForm(t *testing.T) {
 	s := newTestServer(t)
 	session := startAuth(t, s, "openid")

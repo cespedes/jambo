@@ -111,6 +111,18 @@ func (s *Server) tokenAuthorizationCode(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// The authorization code MUST have been issued to the client now
+	// presenting it (RFC 6749 section 4.1.3) -- otherwise any registered
+	// client could redeem a code that leaked from a completely different
+	// client's flow (e.g. via a referrer leak) using its own credentials.
+	if conn.client.id != client.id {
+		if s.debug {
+			log.Printf("%s POST /token: code was issued to client %q, not %q\n", r.RemoteAddr, conn.client.id, client.id)
+		}
+		fmt.Fprintln(w, `{"error":"invalid_grant","error_description":"Authorization code was not issued to this client."}`)
+		return
+	}
+
 	if redirectURI != conn.redirectURI {
 		if s.debug {
 			log.Printf("%s POST /token: invalid redirect_uri=%q\n", r.RemoteAddr, redirectURI)
