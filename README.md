@@ -32,10 +32,12 @@ func main() {
 	s.SetAuthenticator(func (req *jambo.Request) jambo.Response {
 		if req.Params["login"] == "admin" && req.Params["password"] == "secret" {
 			return jambo.Response{
-				Type: jambo.ResponseTypeLoginOK,
-				Login:  "admin",
-				Name:   "Charlie Root",
-				Claims: map[string]any{},
+				Type:       jambo.ResponseTypeLoginOK,
+				Login:      "admin",
+				Name:       "Charlie Root",
+				GivenName:  "Charlie",
+				FamilyName: "Root",
+				Claims:     map[string]any{},
 			}
 		}
 		return jambo.Response{

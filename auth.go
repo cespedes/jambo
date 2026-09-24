@@ -230,6 +230,12 @@ type Response struct {
 	// User name and surname.  Used in claim "name".
 	Name string
 
+	// First and last name.  Used in claims "given_name" and "family_name".
+	// Some relying parties (e.g. Apple Business Manager) require these
+	// even when "name" is also set.
+	GivenName  string
+	FamilyName string
+
 	// e-mail address.  Used in claim "email".
 	Mail string
 

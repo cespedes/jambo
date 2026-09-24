@@ -219,6 +219,8 @@ type IDToken struct {
 	Nonce             string `json:"nonce,omitempty"`
 	PreferredUsername string `json:"preferred_username,omitempty"`
 	Name              string `json:"name,omitempty"`
+	GivenName         string `json:"given_name,omitempty"`
+	FamilyName        string `json:"family_name,omitempty"`
 	Email             string `json:"email,omitempty"`
 	EmailVerified     bool   `json:"email_verified,omitempty"`
 
@@ -245,6 +247,12 @@ func (idt IDToken) MarshalJSON() ([]byte, error) {
 	}
 	if idt.Name != "" {
 		om.Set("name", idt.Name)
+	}
+	if idt.GivenName != "" {
+		om.Set("given_name", idt.GivenName)
+	}
+	if idt.FamilyName != "" {
+		om.Set("family_name", idt.FamilyName)
 	}
 	if idt.Email != "" {
 		om.Set("email", idt.Email)
@@ -286,6 +294,8 @@ func (s *Server) signToken(clientID string, scopes []string, nonce string, resp 
 	}
 	if slices.Contains(scopes, scopeProfile) {
 		idToken.Name = resp.Name
+		idToken.GivenName = resp.GivenName
+		idToken.FamilyName = resp.FamilyName
 		idToken.PreferredUsername = resp.Login
 	}
 	if slices.Contains(scopes, scopeEmail) {

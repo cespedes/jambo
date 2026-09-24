@@ -63,6 +63,8 @@ func (s *Server) openIDConfiguration(w http.ResponseWriter, r *http.Request) {
 			"iat", // Time at which the JWT was issued.
 			// User profile claims:
 			"name",               // Full name
+			"given_name",         // First name
+			"family_name",        // Last name
 			"email",              // Preferred e-mail address
 			"preferred_username", // Shorthand name by which the End-User wishes to be referred to.
 			// "jti",                // JWT ID.  A unique identifier for the token.
