@@ -40,6 +40,7 @@ type openidConfiguration struct {
 	// missing a lot of "optional" fields
 }
 
+// openIDConfiguration handles "GET /.well-known/openid-configuration".
 func (s *Server) openIDConfiguration(w http.ResponseWriter, r *http.Request) {
 	config := openidConfiguration{
 		Issuer:                            s.issuer,

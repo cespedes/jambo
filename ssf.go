@@ -84,10 +84,11 @@ type Subject struct {
 	ID     string `json:"id,omitempty"` // used with Format == "opaque"
 }
 
+// Subject identifier formats (RFC 9493) accepted as Subject.Format.
 const (
-	SubjectFormatEmail  = "email"
-	SubjectFormatIssSub = "iss_sub"
-	SubjectFormatOpaque = "opaque"
+	SubjectFormatEmail  = "email"   // Subject.Email is set
+	SubjectFormatIssSub = "iss_sub" // Subject.Iss and Subject.Sub are set
+	SubjectFormatOpaque = "opaque"  // Subject.ID is set
 )
 
 func (s Subject) equal(o Subject) bool {
@@ -110,9 +111,9 @@ func (s Subject) equal(o Subject) bool {
 // stream: either pushed by the transmitter (RFC 8935) to EndpointURL, or
 // polled by the receiver (RFC 8936) from EndpointURL.
 type Delivery struct {
-	Method              string `json:"method"`
-	EndpointURL         string `json:"endpoint_url,omitempty"`
-	AuthorizationHeader string `json:"authorization_header,omitempty"`
+	Method              string `json:"method"`                         // one of the delivery method URIs isPushDeliveryMethod/isPollDeliveryMethod accept
+	EndpointURL         string `json:"endpoint_url,omitempty"`         // where SETs are POSTed to (push) or polled from (poll)
+	AuthorizationHeader string `json:"authorization_header,omitempty"` // sent as "Authorization" on each push, if set
 }
 
 // Stream is a Shared Signals Framework event stream, as created and
@@ -142,6 +143,7 @@ type Stream struct {
 // as an array.
 type audienceList []string
 
+// UnmarshalJSON implements [json.Unmarshaler], accepting either shape described in audienceList's doc comment.
 func (a *audienceList) UnmarshalJSON(data []byte) error {
 	var multi []string
 	if err := json.Unmarshal(data, &multi); err == nil {
@@ -156,15 +158,17 @@ func (a *audienceList) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// Values a Stream's (internal) Status field may hold; also the values
+// accepted by the /ssf/status management endpoint.
 const (
-	StreamStatusEnabled  = "enabled"
-	StreamStatusPaused   = "paused"
-	StreamStatusDisabled = "disabled"
+	StreamStatusEnabled  = "enabled"  // events are delivered normally
+	StreamStatusPaused   = "paused"   // no events are delivered, but the stream still exists
+	StreamStatusDisabled = "disabled" // no events are delivered
 )
 
 // PendingEvent is a signed Security Event Token queued for a poll-delivery stream.
 type PendingEvent struct {
-	JTI string
+	JTI string // the SET's "jti" claim, used to ack/nack it when polling
 	SET string // compact JWS serialization
 }
 
@@ -254,6 +258,7 @@ type ssfConfiguration struct {
 	VerificationEndpoint     string   `json:"verification_endpoint,omitempty"`
 }
 
+// ssfConfigurationHandler handles "GET /.well-known/ssf-configuration".
 func (s *Server) ssfConfigurationHandler(w http.ResponseWriter, r *http.Request) {
 	config := ssfConfiguration{
 		Issuer:                   s.issuer,

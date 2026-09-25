@@ -36,6 +36,9 @@ var _webStatic embed.FS
 //go:embed web/templates
 var _webTemplates embed.FS
 
+// Client is an OAuth2/OIDC client (a relying party) allowed to
+// authenticate through a Server, created with [Server.NewClient] or
+// [Server.ReplaceClient].
 type Client struct {
 	id     string
 	secret string
@@ -53,6 +56,10 @@ type Client struct {
 	ssfEventsSupported  []string // Shared Signals Framework event type URIs this client's streams may receive
 }
 
+// Connection holds the state of one pending login flow: a /auth request
+// that hasn't yet been completed by /auth/login or redeemed at /token.
+// It has no exported fields or methods; a host application only ever
+// passes one it got from [Server.GetConnection] to [Server.SetConnection].
 type Connection struct {
 	code        string
 	created     time.Time // used to expire stale, unredeemed connections
@@ -84,6 +91,9 @@ func (s *Server) purgeExpiredConnections() {
 	}
 }
 
+// Server is an OpenID Connect provider and an [http.Handler]. Create one
+// with [NewServer], register clients with [Server.NewClient], and supply
+// [Server.SetAuthenticator] before serving requests.
 type Server struct {
 	// General configuration of server:
 	root          string
@@ -163,6 +173,11 @@ func (s *Server) removeClientLocked(id string) bool {
 	return false
 }
 
+// NewServer creates a Server for the OpenID Connect provider identified
+// by issuer, mounted under root. The returned Server has a fresh signing
+// key, jambo's embedded default web assets, and an in-memory Storage;
+// register at least one client with [Server.NewClient] and supply
+// [Server.SetAuthenticator] before serving requests.
 func NewServer(issuer, root string) *Server {
 	var err error
 
@@ -198,7 +213,6 @@ func NewServer(issuer, root string) *Server {
 	s.connections = make(map[string]Connection)
 	s.storage = NewMemoryStorage()
 
-	// fmt.Printf("Server ready at %s (root path is %s).\n", issuer, root)
 	return &s
 }
 
@@ -317,10 +331,11 @@ func (s *Server) ReplacePresentation(staticFS, templatesFS fs.FS, templateArgs m
 	return nil
 }
 
+// ServeHTTP implements [http.Handler], dispatching every OIDC/SSF
+// endpoint and static asset under s's root.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sp := http.StripPrefix(s.root, s.handler)
 	sp.ServeHTTP(w, r)
-	// s.handler.ServeHTTP(w, r)
 }
 
 func (s *Server) createKey() error {
@@ -353,23 +368,32 @@ func (s *Server) createKey() error {
 	return nil
 }
 
+// SetAuthenticator installs the callback /auth/login calls to validate
+// the credentials a user submitted, and decide whether to log them in.
 func (s *Server) SetAuthenticator(f func(req *Request) Response) {
 	s.authenticator = f
 }
 
 type contextKey struct{}
 
-// SetConnection stores a Connection in a http.Request
+// SetConnection returns a copy of r whose context carries conn, so a
+// later call to GetConnection on that request (or one derived from it)
+// can retrieve it.
 func (s *Server) SetConnection(r *http.Request, conn *Connection) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), contextKey{}, conn))
 }
 
-// SetConnection gets a Connection previously stored in a http.Request
+// GetConnection returns the Connection previously stored in r by
+// SetConnection, or nil if none was.
 func (s *Server) GetConnection(r *http.Request) *Connection {
 	c, _ := r.Context().Value(contextKey{}).(*Connection)
 	return c
 }
 
+// NewClient registers a new client (a relying party) allowed to
+// authenticate through s, identified by the OAuth2 client_id name and
+// authenticated with the client_secret secret. Configure it further with
+// [Client.AddAllowedRedirectURIs] and the other Client methods.
 func (s *Server) NewClient(name, secret string) *Client {
 	s.Lock()
 	defer s.Unlock()
@@ -456,6 +480,9 @@ func (s *Server) ReplaceClient(id, secret string) *Client {
 	return c
 }
 
+// AddAllowedRedirectURIs adds one or more URIs c is allowed to redirect
+// back to after a successful login. /auth rejects a request whose
+// redirect_uri isn't one of these.
 func (c *Client) AddAllowedRedirectURIs(names ...string) {
 	c.configMu.Lock()
 	defer c.configMu.Unlock()
@@ -469,6 +496,10 @@ func (c *Client) hasAllowedRedirectURI(uri string) bool {
 	return slices.Contains(c.allowedRedirectURIs, uri)
 }
 
+// AddAllowedScopes adds one or more scopes c is allowed to request beyond
+// the standard "openid"/"profile"/"email" ones (e.g. "offline_access",
+// "ssf.manage", or an application-specific scope). /auth rejects a
+// request for any other scope it doesn't recognize.
 func (c *Client) AddAllowedScopes(names ...string) {
 	c.configMu.Lock()
 	defer c.configMu.Unlock()
@@ -482,10 +513,9 @@ func (c *Client) hasAllowedScope(scope string) bool {
 	return slices.Contains(c.allowedScopes, scope)
 }
 
-// AddAllowedRoles adds one or more roles to the list of the
-// allowed roles for users.  If there are no allowed roles, any user
-// can log in.  If there is at least one, the users must belong to one
-// of them.
+// AddAllowedRoles adds one or more roles a user must belong to at least
+// one of in order to log in through c. If none are ever added, any
+// authenticated user is allowed.
 func (c *Client) AddAllowedRoles(names ...string) {
 	c.configMu.Lock()
 	defer c.configMu.Unlock()
@@ -499,7 +529,3 @@ func (c *Client) allowedRolesSnapshot() []string {
 	defer c.configMu.RUnlock()
 	return slices.Clone(c.allowedRoles)
 }
-
-//	allowedScopes         []string // allowed extra scopes
-//	allowedAuthenticators []string // if empty, any authenticator is allowed
-//	allowedRoles          []string // if empty, any user is allowed

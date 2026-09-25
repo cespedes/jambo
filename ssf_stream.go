@@ -285,6 +285,10 @@ func (s *Server) ssfReplaceStream(w http.ResponseWriter, r *http.Request) {
 	s.ssfModifyStream(w, r, true)
 }
 
+// ssfModifyStream implements both ssfUpdateStream and ssfReplaceStream:
+// replace selects PUT semantics (every field is set from req, clearing
+// any not present) instead of PATCH semantics (only fields present in
+// req are changed).
 func (s *Server) ssfModifyStream(w http.ResponseWriter, r *http.Request, replace bool) {
 	clientID, err := s.requireSSFScope(r, "ssf.manage")
 	if err != nil {
@@ -407,7 +411,8 @@ func (s *Server) ssfGetStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"stream_id": stream.StreamID, "status": stream.Status})
 }
 
-// ssfSetStatus handles "POST /ssf/status".
+// ssfSetStatus handles "POST /ssf/status": pauses, enables or disables a
+// stream, identified the same way as ssfGetStatus.
 func (s *Server) ssfSetStatus(w http.ResponseWriter, r *http.Request) {
 	clientID, err := s.requireSSFScope(r, "ssf.manage")
 	if err != nil {
@@ -589,6 +594,8 @@ func (s *Server) ssfVerify(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// emitStreamUpdated notifies the stream's own receiver, via the stream
+// itself, that ssfModifyStream just changed its configuration.
 func (s *Server) emitStreamUpdated(stream Stream) {
 	_ = s.deliverEvent(stream, eventSSFStreamUpdated, Subject{Format: SubjectFormatOpaque, ID: stream.StreamID}, nil)
 }

@@ -16,6 +16,8 @@ This is a complete example:
 package main
 
 import (
+	"net/http"
+
 	"github.com/cespedes/jambo"
 )
 
@@ -87,7 +89,7 @@ which is configured to authenticate using Jambo, our OpenID Connect provider.
 - Jambo creates a session for this connection and stores its state.
 - Jambo parses a HTML template and offers it to Alice a login page (typically with a HTML form).
 - Alice fills the user and password and presses "submit".
-- The form is posted to the authentication page (https://jambo.example.com/auth/request).
+- The form is posted to the authentication page (https://jambo.example.com/auth/login).
 - Jambo receives the request, checks if it comes from an active session, and calls the
   Authenticator function with all the parameters received from the form.
 - The Authentication function checks the parameters and returns a "Login OK".

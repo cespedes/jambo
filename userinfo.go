@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+// userinfo handles "GET /userinfo": verifies the bearer access token and
+// echoes back its claims, as long as it hasn't expired.
 func (s *Server) userinfo(w http.ResponseWriter, r *http.Request) {
 	fields := strings.Fields(r.Header.Get("Authorization"))
 	if len(fields) != 2 || fields[0] != "Bearer" {

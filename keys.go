@@ -7,6 +7,8 @@ import (
 	"strconv"
 )
 
+// openIDKeys handles "GET /keys": the JWKS a client needs to verify the
+// signature of the tokens jambo issues.
 func (s *Server) openIDKeys(w http.ResponseWriter, r *http.Request) {
 	jwks := s.allKeys
 	data, err := json.MarshalIndent(jwks, "", "  ")

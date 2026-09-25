@@ -74,6 +74,9 @@ type securityEventToken struct {
 	Events   map[string]map[string]any `json:"events"`
 }
 
+// signSecurityEvent builds and signs a securityEventToken for
+// (eventType, subject, claims) addressed to stream's audience, returning
+// its compact JWS serialization and its "jti".
 func (s *Server) signSecurityEvent(stream Stream, eventType string, subject Subject, claims map[string]any) (jws, jti string, err error) {
 	signingKey := jose.SigningKey{Key: s.key, Algorithm: jose.RS256}
 	signer, err := jose.NewSigner(signingKey, (&jose.SignerOptions{}).WithType("secevent+jwt"))
@@ -220,7 +223,10 @@ func (s *Server) ssfPoll(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"sets":          sets,
+		"sets": sets,
+		// Always false: unlike PendingEvents, we don't currently learn
+		// whether MaxEvents truncated the result, so we can't report this
+		// accurately when it does.
 		"moreAvailable": false,
 	})
 }

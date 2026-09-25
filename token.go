@@ -26,12 +26,14 @@ import (
 // since -- unlike the short-lived authorization code -- it is meant to
 // outlive a single login and, often, a process restart.
 type RefreshToken struct {
-	Token    string
-	ClientID string
-	Scopes   []string
+	Token    string   // the opaque bearer value the client presents at /token
+	ClientID string   // the client it was issued to
+	Scopes   []string // the scopes it was granted, reused for every token it's redeemed for
 	Response Response // carries the login/name/mail/claims to reissue tokens from
 }
 
+// openIDToken handles "POST /token", dispatching to
+// tokenAuthorizationCode or tokenRefreshToken by grant_type.
 func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	switch r.PostFormValue("grant_type") {
 	case "authorization_code":
@@ -71,6 +73,9 @@ func (s *Server) authenticateClient(r *http.Request) (*Client, error) {
 	return c, nil
 }
 
+// tokenAuthorizationCode handles "grant_type=authorization_code" at
+// /token (RFC 6749 section 4.1.3): redeems a code for an ID/access token
+// and, if the client requested "offline_access", a refresh token.
 func (s *Server) tokenAuthorizationCode(w http.ResponseWriter, r *http.Request) {
 	code := r.PostFormValue("code")
 	if code == "" {
@@ -206,7 +211,9 @@ func validPKCEVerifier(method, challenge, verifier string) bool {
 	return subtle.ConstantTimeCompare([]byte(computed), []byte(challenge)) == 1
 }
 
-// https://openid.net/specs/openid-connect-core-1_0.html#rfc.section.2
+// IDToken is the set of claims signed into the JWS jambo issues as both
+// "id_token" and "access_token" (see signToken). See
+// https://openid.net/specs/openid-connect-core-1_0.html#rfc.section.2.
 type IDToken struct {
 	// Standard claims:
 	Issuer            string `json:"iss"`
@@ -227,8 +234,9 @@ type IDToken struct {
 	Claims map[string]any
 }
 
+// MarshalJSON implements [json.Marshaler], emitting the standard claims
+// in a fixed, spec-friendly order followed by whatever is in idt.Claims.
 func (idt IDToken) MarshalJSON() ([]byte, error) {
-	// an Event will be marshaled with all its keys next to those in Extra.
 	om := orderedmap.New()
 	om.Set("iss", idt.Issuer)
 	om.Set("sub", idt.SubjectIdentifier)

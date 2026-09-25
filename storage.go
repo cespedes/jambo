@@ -13,8 +13,12 @@ import "sync"
 // whatever datastore it already runs, and install it with
 // [Server.SetStorage] before serving traffic.
 type Storage interface {
+	// SaveRefreshToken creates or overwrites a refresh token, keyed by rt.Token.
 	SaveRefreshToken(rt RefreshToken) error
+	// GetRefreshToken looks up a previously saved refresh token by its value.
 	GetRefreshToken(token string) (rt RefreshToken, ok bool, err error)
+	// DeleteRefreshToken removes one refresh token. Deleting an unknown
+	// token is a no-op.
 	DeleteRefreshToken(token string) error
 	// DeleteRefreshTokensForClient removes every refresh token issued to
 	// clientID. Server.RemoveClient calls this, so a client id that gets
@@ -22,9 +26,14 @@ type Storage interface {
 	// inherits tokens issued to whatever previously had that id.
 	DeleteRefreshTokensForClient(clientID string) error
 
+	// SaveStream creates or overwrites a stream, keyed by stream.StreamID.
 	SaveStream(stream Stream) error
+	// GetStream looks up a previously saved stream by its id.
 	GetStream(streamID string) (stream Stream, ok bool, err error)
+	// ListStreams returns every stream belonging to clientID.
 	ListStreams(clientID string) ([]Stream, error)
+	// DeleteStream removes one stream and any events queued for it.
+	// Deleting an unknown stream id is a no-op.
 	DeleteStream(streamID string) error
 
 	// QueueEvent appends a signed Security Event Token pending poll delivery.
@@ -49,6 +58,7 @@ type MemoryStorage struct {
 	events        map[string][]PendingEvent // streamID -> pending events, oldest first
 }
 
+// NewMemoryStorage returns an empty [MemoryStorage], ready to use.
 func NewMemoryStorage() *MemoryStorage {
 	return &MemoryStorage{
 		refreshTokens: make(map[string]RefreshToken),
@@ -57,6 +67,7 @@ func NewMemoryStorage() *MemoryStorage {
 	}
 }
 
+// SaveRefreshToken implements [Storage].
 func (m *MemoryStorage) SaveRefreshToken(rt RefreshToken) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -64,6 +75,7 @@ func (m *MemoryStorage) SaveRefreshToken(rt RefreshToken) error {
 	return nil
 }
 
+// GetRefreshToken implements [Storage].
 func (m *MemoryStorage) GetRefreshToken(token string) (RefreshToken, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -71,6 +83,7 @@ func (m *MemoryStorage) GetRefreshToken(token string) (RefreshToken, bool, error
 	return rt, ok, nil
 }
 
+// DeleteRefreshToken implements [Storage].
 func (m *MemoryStorage) DeleteRefreshToken(token string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -78,6 +91,7 @@ func (m *MemoryStorage) DeleteRefreshToken(token string) error {
 	return nil
 }
 
+// DeleteRefreshTokensForClient implements [Storage].
 func (m *MemoryStorage) DeleteRefreshTokensForClient(clientID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -89,6 +103,7 @@ func (m *MemoryStorage) DeleteRefreshTokensForClient(clientID string) error {
 	return nil
 }
 
+// SaveStream implements [Storage].
 func (m *MemoryStorage) SaveStream(stream Stream) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -96,6 +111,7 @@ func (m *MemoryStorage) SaveStream(stream Stream) error {
 	return nil
 }
 
+// GetStream implements [Storage].
 func (m *MemoryStorage) GetStream(streamID string) (Stream, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -103,6 +119,7 @@ func (m *MemoryStorage) GetStream(streamID string) (Stream, bool, error) {
 	return st, ok, nil
 }
 
+// ListStreams implements [Storage].
 func (m *MemoryStorage) ListStreams(clientID string) ([]Stream, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -115,6 +132,7 @@ func (m *MemoryStorage) ListStreams(clientID string) ([]Stream, error) {
 	return out, nil
 }
 
+// DeleteStream implements [Storage].
 func (m *MemoryStorage) DeleteStream(streamID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -123,6 +141,7 @@ func (m *MemoryStorage) DeleteStream(streamID string) error {
 	return nil
 }
 
+// QueueEvent implements [Storage].
 func (m *MemoryStorage) QueueEvent(streamID string, event PendingEvent) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -130,6 +149,7 @@ func (m *MemoryStorage) QueueEvent(streamID string, event PendingEvent) error {
 	return nil
 }
 
+// PendingEvents implements [Storage].
 func (m *MemoryStorage) PendingEvents(streamID string, max int) ([]PendingEvent, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -142,6 +162,7 @@ func (m *MemoryStorage) PendingEvents(streamID string, max int) ([]PendingEvent,
 	return out, nil
 }
 
+// AckEvent implements [Storage].
 func (m *MemoryStorage) AckEvent(streamID, jti string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

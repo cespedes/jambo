@@ -107,8 +107,10 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// authLogin is the action called from the "form" where user has authenticated.
-// It should have the value "session" (and probably a few more) in the query
+// authLogin is the handler for "POST /auth/login", the login form's
+// submission. It looks up the pending Connection by the "session" form
+// value, calls the host's authenticator with every submitted field, and
+// dispatches on the resulting Response.Type.
 func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 	err := r.ParseForm()
 	if err != nil {
@@ -194,17 +196,17 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// A Request is a message sent from the OIDC server to the authenticator,
-// asking if a given credentials are valid
+// Request is a message sent from the OIDC server to the authenticator,
+// asking whether the given credentials are valid.
 type Request struct {
-	Session string // unique ID for this user.
-	Client  string
-	Scopes  []string // scopes the user has requested
-	Roles   []string // list of allowed roles
-	Params  map[string]string
+	Session string            // unique ID for this login attempt.
+	Client  string            // id of the OIDC client the user is signing in to.
+	Scopes  []string          // scopes the user has requested
+	Roles   []string          // roles allowed to sign in through Client; the authenticator should check the user belongs to at least one
+	Params  map[string]string // form parameters submitted by the user (e.g. login, password, OTP)
 }
 
-// A Response is sent from the authenticator to the OIDC server, answering a Request.
+// Response is sent from the authenticator to the OIDC server, answering a Request.
 type Response struct {
 	Type ResponseType
 
@@ -218,11 +220,11 @@ type Response struct {
 
 	// Standard claims:
 
-	// login for the user. It is usually the same sent in the request.
-	// Used in claims "sub" and "preferred_username".
+	// Login is the user's login/username, usually the same value sent in
+	// the request. Used in claims "sub" and "preferred_username".
 	Login string
 
-	// User name and surname.  Used in claim "name".
+	// Name is the user's full name (given name and surname). Used in claim "name".
 	Name string
 
 	// First and last name.  Used in claims "given_name" and "family_name".
@@ -238,11 +240,13 @@ type Response struct {
 	Claims map[string]any
 }
 
+// ResponseType is the kind of answer a Response carries; see the
+// ResponseType* constants.
 type ResponseType int
 
 const (
-	ResponseTypeInvalid     ResponseType = iota
-	ResponseTypeLoginOK                  // login is successful
-	ResponseTypeLoginFailed              // login failed
-	ResponseTypeRedirect                 // login is OK so far, but we are not finished yet
+	ResponseTypeInvalid     ResponseType = iota // zero value; an authenticator should never return this
+	ResponseTypeLoginOK                         // login is successful
+	ResponseTypeLoginFailed                     // login failed
+	ResponseTypeRedirect                        // login is OK so far, but we are not finished yet
 )
