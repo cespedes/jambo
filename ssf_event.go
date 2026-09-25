@@ -211,7 +211,7 @@ func (s *Server) ssfPoll(w http.ResponseWriter, r *http.Request) {
 		_ = s.storage.AckEvent(streamID, jti)
 	}
 
-	events, err := s.storage.PendingEvents(streamID, body.MaxEvents)
+	events, moreAvailable, err := s.storage.PendingEvents(streamID, body.MaxEvents)
 	if err != nil {
 		http.Error(w, "Internal server error reading pending events.", http.StatusInternalServerError)
 		return
@@ -223,10 +223,7 @@ func (s *Server) ssfPoll(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"sets": sets,
-		// Always false: unlike PendingEvents, we don't currently learn
-		// whether MaxEvents truncated the result, so we can't report this
-		// accurately when it does.
-		"moreAvailable": false,
+		"sets":          sets,
+		"moreAvailable": moreAvailable,
 	})
 }

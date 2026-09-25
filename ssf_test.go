@@ -591,6 +591,59 @@ func TestSSFPollDelivery(t *testing.T) {
 	}
 }
 
+// TestSSFPollReportsMoreAvailable guards against a regression where
+// "moreAvailable" was hardcoded to false even when maxEvents truncated
+// the result.
+func TestSSFPollReportsMoreAvailable(t *testing.T) {
+	s := newSSFTestServer(t)
+	body := ssfExchangeCode(t, s, "openid ssf.manage ssf.read")
+	accessToken, _ := body["access_token"].(string)
+
+	status, streamResp := ssfDo(t, s, http.MethodPost, "/ssf/stream", accessToken, streamRequest{
+		Delivery:        Delivery{Method: deliveryMethodPoll},
+		EventsRequested: []string{EventCAEPSessionRevoked},
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("POST /ssf/stream: status = %d, body = %v", status, streamResp)
+	}
+	streamID, _ := streamResp["stream_id"].(string)
+
+	// Stream creation already queued a verification event; add two more so
+	// three are pending in total.
+	subject := Subject{Format: SubjectFormatOpaque, ID: "user-1"}
+	if status, _ := ssfDo(t, s, http.MethodPost, "/ssf/subjects:add", accessToken, subjectRequest{StreamID: streamID, Subject: subject}); status != http.StatusNoContent {
+		t.Fatalf("POST /ssf/subjects:add: status = %d", status)
+	}
+	for range 2 {
+		if err := s.EmitSecurityEvent(ssfClientID, EventCAEPSessionRevoked, subject, nil); err != nil {
+			t.Fatalf("EmitSecurityEvent: %v", err)
+		}
+	}
+
+	pollPath := fmt.Sprintf("/ssf/poll/%s", streamID)
+	status, pollResp := ssfDo(t, s, http.MethodPost, pollPath, accessToken, map[string]any{"maxEvents": 2})
+	if status != http.StatusOK {
+		t.Fatalf("POST %s: status = %d, body = %v", pollPath, status, pollResp)
+	}
+	if sets, _ := pollResp["sets"].(map[string]any); len(sets) != 2 {
+		t.Errorf("poll sets with maxEvents=2 = %v, want exactly 2", sets)
+	}
+	if pollResp["moreAvailable"] != true {
+		t.Errorf("moreAvailable = %v, want true (3 pending, only 2 requested)", pollResp["moreAvailable"])
+	}
+
+	status, pollResp = ssfDo(t, s, http.MethodPost, pollPath, accessToken, map[string]any{"maxEvents": 10})
+	if status != http.StatusOK {
+		t.Fatalf("POST %s: status = %d, body = %v", pollPath, status, pollResp)
+	}
+	if sets, _ := pollResp["sets"].(map[string]any); len(sets) != 3 {
+		t.Errorf("poll sets with maxEvents=10 = %v, want exactly 3", sets)
+	}
+	if pollResp["moreAvailable"] != false {
+		t.Errorf("moreAvailable = %v, want false (all 3 pending events fit in maxEvents=10)", pollResp["moreAvailable"])
+	}
+}
+
 func TestSSFConfigurationDiscovery(t *testing.T) {
 	s := newSSFTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/oidc/.well-known/ssf-configuration", nil)

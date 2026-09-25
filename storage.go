@@ -38,9 +38,10 @@ type Storage interface {
 
 	// QueueEvent appends a signed Security Event Token pending poll delivery.
 	QueueEvent(streamID string, event PendingEvent) error
-	// PendingEvents returns up to max not-yet-acknowledged events for streamID,
-	// oldest first. A max <= 0 means "no limit".
-	PendingEvents(streamID string, max int) ([]PendingEvent, error)
+	// PendingEvents returns up to max not-yet-acknowledged events for
+	// streamID, oldest first, and whether more remain beyond those
+	// returned. A max <= 0 means "no limit" (moreAvailable is then always false).
+	PendingEvents(streamID string, max int) (events []PendingEvent, moreAvailable bool, err error)
 	// AckEvent removes an event from the poll queue once the receiver has
 	// acknowledged delivery. Acking an unknown (streamID, jti) is a no-op.
 	AckEvent(streamID, jti string) error
@@ -150,16 +151,18 @@ func (m *MemoryStorage) QueueEvent(streamID string, event PendingEvent) error {
 }
 
 // PendingEvents implements [Storage].
-func (m *MemoryStorage) PendingEvents(streamID string, max int) ([]PendingEvent, error) {
+func (m *MemoryStorage) PendingEvents(streamID string, max int) ([]PendingEvent, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	events := m.events[streamID]
+	var moreAvailable bool
 	if max > 0 && len(events) > max {
+		moreAvailable = true
 		events = events[:max]
 	}
 	out := make([]PendingEvent, len(events))
 	copy(out, events)
-	return out, nil
+	return out, moreAvailable, nil
 }
 
 // AckEvent implements [Storage].
