@@ -100,7 +100,7 @@ which is configured to authenticate using Jambo, our OpenID Connect provider.
   claims (login, name, e-mail...) depending on the requested scopes.
 - GitLab receives the response and sends Alice the GitLab page, already authenticated.
 
-# Reconfiguring clients at runtime
+# Reconfiguring a Server at runtime
 
 `Server.RemoveClient(id)` and `Server.ReplaceClient(id, secret)` let a host
 application apply a changed configuration -- e.g. reloaded from a config
@@ -127,6 +127,24 @@ silently inheriting whatever the previous occupant of that id left
 behind. Existing tokens and Connections it already handed out keep
 working until they'd next need the client looked up again, but no new
 `/auth` or `/token` request will find it.
+
+`Server.ReplacePresentation(staticFS, templatesFS, templateArgs)` does the
+same for the other reloadable part of a Server's configuration -- static
+files, HTML templates and template args -- letting a `web_static`/
+`web_templates`/template-args change from a reloaded config apply without
+restarting:
+
+```go
+s.ReplacePresentation(newStaticFS, newTemplatesFS, newTemplateArgs)
+```
+
+It always builds the new static files/templates/args from scratch
+(layered on jambo's embedded defaults) before atomically swapping them
+in -- `templateArgs` is replaced outright, not merged with whatever was
+set before -- which is what makes it safe to call on a `Server` already
+serving live traffic. `staticFS`/`templatesFS` may be `nil` to mean "just
+the embedded defaults, no override." Client configuration is untouched --
+combine it with `RemoveClient`/`ReplaceClient` above for a full reload.
 
 # Shared Signals Framework (SSF)
 

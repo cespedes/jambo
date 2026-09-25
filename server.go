@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -105,7 +106,7 @@ type Server struct {
 	storage              Storage // set via SetStorage; defaults to an in-memory Storage
 	allowInsecureSSFPush bool    // set via SetSSFAllowPrivatePush; disables the SSRF guard on SSF push endpoint_url
 
-	sync.Mutex  // to access clients and connections
+	sync.Mutex  // to access clients, connections, and the webStatic/webTemplates/templateArgs presentation state
 	clients     []*Client
 	connections map[string]Connection
 }
@@ -228,12 +229,20 @@ func (s *Server) routes() {
 
 	// All the files and dirs inside s.webStatic will be served as-is:
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Snapshot s.webStatic under the lock: ReplacePresentation always
+		// swaps in a brand new fs.FS rather than mutating this one in
+		// place, so using this local copy for the rest of the request,
+		// unlocked, is safe even if a reload happens concurrently.
+		s.Lock()
+		webStatic := s.webStatic
+		s.Unlock()
+
 		// no need to worry about ".." in path because we are looking inside a fs.FS
 		path := strings.Trim(r.URL.Path, "/")
 		if path == "" {
 			path = "."
 		}
-		f, err := s.webStatic.Open(path)
+		f, err := webStatic.Open(path)
 		if err != nil {
 			http.NotFound(w, r)
 			return
@@ -247,7 +256,7 @@ func (s *Server) routes() {
 		if fi.IsDir() {
 			index := filepath.Join(path, "index.html")
 			f.Close()
-			if f, err = s.webStatic.Open(index); err != nil {
+			if f, err = webStatic.Open(index); err != nil {
 				http.NotFound(w, r)
 				return
 			}
@@ -259,47 +268,53 @@ func (s *Server) routes() {
 	})
 }
 
-// AddStaticFS adds the content of a filesystem (a [fs.FS]) to the list of static files
-// served by a Server.
-func (s *Server) AddStaticFS(filesystem fs.FS) {
-	s.webStatic = mergefs.Merge(filesystem, s.webStatic)
-	// fmt.Println("# New static files")
-	// fs.WalkDir(s.webStatic, ".", fs.WalkDirFunc(func(path string, d fs.DirEntry, err error) error {
-	// 	if d.IsDir() {
-	// 		fmt.Print("D")
-	// 	} else {
-	// 		fmt.Print("-")
-	// 	}
-	// 	fmt.Printf(" %s\n", path)
-	// 	return nil
-	// }))
-}
-
-// AddTemplatesFS adds the files inside a [fs.FS] to the list of templates processed by a Server.
-func (s *Server) AddTemplatesFS(filesystem fs.FS) error {
-	var err error
-
-	s.webTemplates, err = s.webTemplates.ParseFS(filesystem, "*")
-
+// ReplacePresentation resets the Server's static files, HTML templates
+// and template arguments to a fresh copy of jambo's embedded defaults,
+// then layers staticFS and templatesFS on top of them (either may be nil
+// to mean "just the embedded defaults, no override"), and replaces
+// templateArgs outright -- it is not merged with whatever was set
+// before.
+//
+// It always builds the new state from scratch -- a fresh
+// *template.Template is parsed rather than reusing and mutating the
+// existing one -- before atomically swapping it in, which is what makes
+// it safe to call on a Server that's already serving live traffic (e.g.
+// to apply web_static/web_templates/template args from a reloaded
+// configuration, on SIGHUP): a request being handled concurrently sees
+// either the old presentation or the new one, never a torn mix of both.
+//
+// Client configuration (Server.clients) is untouched; see
+// [Server.ReplaceClient] for that.
+func (s *Server) ReplacePresentation(staticFS, templatesFS fs.FS, templateArgs map[string]string) error {
+	newStatic, err := fs.Sub(_webStatic, "web/static")
 	if err != nil {
-		return err
+		// Unreachable in practice: this is the same call NewServer makes,
+		// over an embed.FS baked into the binary.
+		return fmt.Errorf("embedded web/static: %w", err)
+	}
+	if staticFS != nil {
+		newStatic = mergefs.Merge(staticFS, newStatic)
 	}
 
-	if s.debug {
-		fmt.Println("# New templates")
-		for _, t := range s.webTemplates.Templates() {
-			fmt.Printf("- %s\n", t.Name())
+	newTemplates, err := template.ParseFS(_webTemplates, "web/templates/*")
+	if err != nil {
+		// Also unreachable in practice; see above.
+		return fmt.Errorf("embedded web/templates: %w", err)
+	}
+	if templatesFS != nil {
+		if newTemplates, err = newTemplates.ParseFS(templatesFS, "*"); err != nil {
+			return err
 		}
 	}
 
-	return nil
-}
+	newArgs := maps.Clone(templateArgs)
 
-func (s *Server) AddTemplateArg(key, value string) {
-	if s.templateArgs == nil {
-		s.templateArgs = make(map[string]string)
-	}
-	s.templateArgs[key] = value
+	s.Lock()
+	defer s.Unlock()
+	s.webStatic = newStatic
+	s.webTemplates = newTemplates
+	s.templateArgs = newArgs
+	return nil
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
