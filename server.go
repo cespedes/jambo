@@ -37,16 +37,16 @@ var _webStatic embed.FS
 var _webTemplates embed.FS
 
 // Client is an OAuth2/OIDC client (a relying party) allowed to
-// authenticate through a Server, created with [Server.NewClient] or
-// [Server.ReplaceClient].
+// authenticate through a Server, created (or reconfigured) with
+// [Server.NewClient].
 type Client struct {
 	id     string
 	secret string
 
 	// configMu guards the four fields below. It exists because a Client
-	// returned by ReplaceClient is already reachable through s.clients --
-	// and so through a live request -- before the caller finishes calling
-	// AddAllowed*/AddSSFEventsSupported on it (see ReplaceClient's doc
+	// returned by NewClient is already reachable through s.clients -- and
+	// so through a live request -- before the caller finishes calling
+	// AddAllowed*/AddSSFEventsSupported on it (see NewClient's doc
 	// comment); without it, that would race with, e.g., auth.go reading
 	// allowedScopes to validate a concurrent /auth request.
 	configMu            sync.RWMutex
@@ -298,7 +298,7 @@ func (s *Server) routes() {
 // either the old presentation or the new one, never a torn mix of both.
 //
 // Client configuration (Server.clients) is untouched; see
-// [Server.ReplaceClient] for that.
+// [Server.NewClient] for that.
 func (s *Server) ReplacePresentation(staticFS, templatesFS fs.FS, templateArgs map[string]string) error {
 	newStatic, err := fs.Sub(_webStatic, "web/static")
 	if err != nil {
@@ -390,17 +390,34 @@ func (s *Server) GetConnection(r *http.Request) *Connection {
 	return c
 }
 
-// NewClient registers a new client (a relying party) allowed to
-// authenticate through s, identified by the OAuth2 client_id name and
-// authenticated with the client_secret secret. Configure it further with
+// NewClient registers a client (a relying party) allowed to authenticate
+// through s, identified by the OAuth2 client_id name and authenticated
+// with the client_secret secret. Configure it further with
 // [Client.AddAllowedRedirectURIs] and the other Client methods.
+//
+// If a client is already registered under name, it's atomically replaced
+// by this one -- so, e.g., a host can apply a changed configuration (a
+// different secret, redirect URIs, scopes, roles or SSF events) by
+// calling NewClient again with the same name, including on a Server
+// that's already serving live traffic (e.g. on a config reload). None of
+// the old Client's configuration carries over: the caller still needs to
+// call AddAllowedRedirectURIs and any other AddAllowed*/
+// AddSSFEventsSupported on the returned Client, exactly as for a
+// brand-new one.
+//
+// That client id's state in Storage (refresh tokens, SSF streams) is
+// untouched either way: it's keyed by the client id string rather than
+// by the *Client value, and remains reachable through the new Client --
+// e.g. a receiver's existing SSF stream survives its client's
+// redirect_uri or scopes being edited and reloaded. Only rely on this
+// when name is meant to keep identifying the same client; to repurpose
+// an id for an unrelated one, call [Server.RemoveClient] first (which
+// does delete that state) and then NewClient.
 func (s *Server) NewClient(name, secret string) *Client {
 	s.Lock()
 	defer s.Unlock()
-	c := &Client{
-		id:     name,
-		secret: secret,
-	}
+	s.removeClientLocked(name)
+	c := &Client{id: name, secret: secret}
 	s.clients = append(s.clients, c)
 	return c
 }
@@ -423,11 +440,12 @@ func (s *Server) NewClient(name, secret string) *Client {
 // RemoveClient's own bool return has no room for a second error.
 //
 // This is a hard delete precisely so that a client id can be reused
-// later (e.g. NewClient after RemoveClient, for an unrelated client)
-// without inheriting whatever the previous occupant of that id left
-// behind. A host that instead wants to reconfigure the *same* client --
-// keeping its refresh tokens and SSF streams -- should call
-// ReplaceClient, not RemoveClient followed by NewClient.
+// later (e.g. a plain NewClient call after RemoveClient, for an
+// unrelated client) without inheriting whatever the previous occupant of
+// that id left behind. A host that instead wants to reconfigure the
+// *same* client -- keeping its refresh tokens and SSF streams -- should
+// just call NewClient again with the same id, not RemoveClient followed
+// by NewClient.
 func (s *Server) RemoveClient(id string) bool {
 	s.Lock()
 	removed := s.removeClientLocked(id)
@@ -452,32 +470,6 @@ func (s *Server) RemoveClient(id string) bool {
 		}
 	}
 	return true
-}
-
-// ReplaceClient atomically removes any existing client registered under
-// id and registers a fresh one in its place, exactly as NewClient would
-// if none existed. Use it to apply a changed configuration -- a
-// different secret, redirect URIs, scopes, roles or SSF events -- to a
-// client id without restarting the Server: the caller still needs to
-// call AddAllowedRedirectURIs and any other AddAllowed*/
-// AddSSFEventsSupported on the returned Client, exactly as after
-// NewClient, since none of the old Client's configuration carries over.
-//
-// Unlike RemoveClient, ReplaceClient does not touch that client id's
-// state in Storage (refresh tokens, SSF streams): it stays there,
-// keyed by the client id string rather than by the *Client value, and
-// remains reachable through the new Client -- e.g. a receiver's existing
-// SSF stream survives its client's redirect_uri or scopes being edited
-// and reloaded. Only use ReplaceClient to reconfigure what is still
-// conceptually the same client; to repurpose an id for an unrelated one,
-// call RemoveClient (which does delete that state) and then NewClient.
-func (s *Server) ReplaceClient(id, secret string) *Client {
-	s.Lock()
-	defer s.Unlock()
-	s.removeClientLocked(id)
-	c := &Client{id: id, secret: secret}
-	s.clients = append(s.clients, c)
-	return c
 }
 
 // AddAllowedRedirectURIs adds one or more URIs c is allowed to redirect

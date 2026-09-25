@@ -38,7 +38,7 @@ func TestRemoveClientRejectsFurtherAuth(t *testing.T) {
 	}
 }
 
-func TestReplaceClientPreservesSSFStreamsButNotTheOldSecret(t *testing.T) {
+func TestNewClientPreservesSSFStreamsButNotTheOldSecret(t *testing.T) {
 	s := newSSFTestServer(t)
 	body := ssfExchangeCode(t, s, "openid ssf.manage ssf.read")
 	accessToken, _ := body["access_token"].(string)
@@ -54,7 +54,7 @@ func TestReplaceClientPreservesSSFStreamsButNotTheOldSecret(t *testing.T) {
 
 	// Simulate a config reload that keeps the same client id but changes
 	// its secret and re-declares its allowed scopes/events.
-	newClient := s.ReplaceClient(ssfClientID, "new-secret")
+	newClient := s.NewClient(ssfClientID, "new-secret")
 	newClient.AddAllowedRedirectURIs("http://client.example.com/callback")
 	newClient.AddAllowedScopes("offline_access", "ssf.manage", "ssf.read")
 	newClient.AddSSFEventsSupported(EventCAEPSessionRevoked)
@@ -64,7 +64,7 @@ func TestReplaceClientPreservesSSFStreamsButNotTheOldSecret(t *testing.T) {
 	// *Client value -- is still there under the freshly configured client.
 	status, streamResp = ssfDo(t, s, http.MethodGet, "/ssf/stream?stream_id="+streamID, accessToken, nil)
 	if status != http.StatusOK {
-		t.Fatalf("GET /ssf/stream after ReplaceClient: status = %d, body = %v", status, streamResp)
+		t.Fatalf("GET /ssf/stream after re-registering the client: status = %d, body = %v", status, streamResp)
 	}
 	if streamResp["stream_id"] != streamID {
 		t.Errorf("stream_id = %v, want %s", streamResp["stream_id"], streamID)
@@ -82,7 +82,7 @@ func TestReplaceClientPreservesSSFStreamsButNotTheOldSecret(t *testing.T) {
 		t.Fatalf("POST /token: invalid JSON: %v (body=%s)", err, rec.Body.String())
 	}
 	if tokBody["error"] != "invalid_client" {
-		t.Errorf("POST /token with the old secret after ReplaceClient: error = %v, want invalid_client", tokBody["error"])
+		t.Errorf("POST /token with the old secret after re-registering the client: error = %v, want invalid_client", tokBody["error"])
 	}
 }
 
@@ -150,13 +150,14 @@ func TestRemoveClientPurgesRefreshTokensAndSSFStreams(t *testing.T) {
 	}
 }
 
-// TestReplaceClientConcurrentWithAuth exercises ReplaceClient and a
-// Client's AddAllowed* methods concurrently with /auth requests reading
-// that same Client's configuration. It doesn't assert much about the
-// outcome of any single request (both "success" and "unregistered
-// redirect_uri" are valid depending on timing) -- its purpose is to give
-// `go test -race` a real chance to catch a data race if one exists.
-func TestReplaceClientConcurrentWithAuth(t *testing.T) {
+// TestNewClientConcurrentWithAuth exercises re-registering a client via
+// NewClient and a Client's AddAllowed* methods concurrently with /auth
+// requests reading that same Client's configuration. It doesn't assert
+// much about the outcome of any single request (both "success" and
+// "unregistered redirect_uri" are valid depending on timing) -- its
+// purpose is to give `go test -race` a real chance to catch a data race
+// if one exists.
+func TestNewClientConcurrentWithAuth(t *testing.T) {
 	s := newTestServer(t)
 	done := make(chan struct{})
 	var wg sync.WaitGroup
@@ -165,7 +166,7 @@ func TestReplaceClientConcurrentWithAuth(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for range 200 {
-			c := s.ReplaceClient("test-client", "test-secret")
+			c := s.NewClient("test-client", "test-secret")
 			c.AddAllowedRedirectURIs("http://client.example.com/callback")
 			c.AddAllowedScopes("token")
 			c.AddAllowedRoles("staff")

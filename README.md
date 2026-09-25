@@ -104,29 +104,30 @@ which is configured to authenticate using Jambo, our OpenID Connect provider.
 
 # Reconfiguring a Server at runtime
 
-`Server.RemoveClient(id)` and `Server.ReplaceClient(id, secret)` let a host
+`Server.NewClient(id, secret)` and `Server.RemoveClient(id)` let a host
 application apply a changed configuration -- e.g. reloaded from a config
 file on `SIGHUP` -- to a `Server` that's already serving requests, without
 restarting it:
 
 ```go
-client := s.ReplaceClient(clientID, newSecret) // drops the old one first, if any
+client := s.NewClient(clientID, newSecret) // drops the old one under this id first, if any
 client.AddAllowedRedirectURIs(newRedirectURIs...)
 client.AddAllowedScopes(newScopes...)
 ```
 
-`ReplaceClient` only replaces the `*Client` itself; any refresh tokens or
-SSF streams already created under that client id are untouched (they're
-keyed by the id string, not by the `*Client` value) and remain reachable
-through the newly configured client -- use it when the config change is
-still, conceptually, the same client.
+Calling `NewClient` again with an id that's already registered atomically
+replaces that `*Client`; any refresh tokens or SSF streams already
+created under that client id are untouched (they're keyed by the id
+string, not by the `*Client` value) and remain reachable through the
+newly configured client -- this is what you want when the config change
+is still, conceptually, the same client.
 
 `Server.RemoveClient(id)` is a hard delete instead: besides removing the
 client itself, it also deletes that client id's refresh tokens and SSF
 streams from `Storage`, precisely so that reusing the same id later (e.g.
-`NewClient` for a completely unrelated client) starts clean rather than
-silently inheriting whatever the previous occupant of that id left
-behind. Existing tokens and Connections it already handed out keep
+a plain `NewClient` call for a completely unrelated client) starts clean
+rather than silently inheriting whatever the previous occupant of that id
+left behind. Existing tokens and Connections it already handed out keep
 working until they'd next need the client looked up again, but no new
 `/auth` or `/token` request will find it.
 
@@ -146,7 +147,7 @@ in -- `templateArgs` is replaced outright, not merged with whatever was
 set before -- which is what makes it safe to call on a `Server` already
 serving live traffic. `staticFS`/`templatesFS` may be `nil` to mean "just
 the embedded defaults, no override." Client configuration is untouched --
-combine it with `RemoveClient`/`ReplaceClient` above for a full reload.
+combine it with `NewClient`/`RemoveClient` above for a full reload.
 
 # Shared Signals Framework (SSF)
 
