@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/cespedes/jambo"
 )
@@ -50,5 +51,10 @@ func run(args []string) error {
 	})
 
 	log.Printf("issuer=%q root=%q listenAddr=%q\n", issuer, root, listenAddr)
-	return http.ListenAndServe(listenAddr, s)
+	server := &http.Server{
+		Addr:              listenAddr,
+		Handler:           s,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	return server.ListenAndServe()
 }

@@ -408,7 +408,7 @@ func (s *Server) ssfGetStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"stream_id": stream.StreamID, "status": stream.Status})
+	s.encodeSSFJSON(w, map[string]string{"stream_id": stream.StreamID, "status": stream.Status})
 }
 
 // ssfSetStatus handles "POST /ssf/status": pauses, enables or disables a
@@ -455,7 +455,7 @@ func (s *Server) ssfSetStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"stream_id": stream.StreamID, "status": stream.Status})
+	s.encodeSSFJSON(w, map[string]string{"stream_id": stream.StreamID, "status": stream.Status})
 }
 
 type subjectRequest struct {
@@ -603,5 +603,5 @@ func (s *Server) emitStreamUpdated(stream Stream) {
 func (s *Server) writeStreamJSON(w http.ResponseWriter, status int, stream Stream) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(stream)
+	s.encodeSSFJSON(w, stream)
 }

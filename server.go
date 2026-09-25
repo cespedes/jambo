@@ -269,7 +269,7 @@ func (s *Server) routes() {
 		}
 		if fi.IsDir() {
 			index := filepath.Join(path, "index.html")
-			f.Close()
+			_ = f.Close() // nothing to act on: we're about to open a different file anyway
 			if f, err = webStatic.Open(index); err != nil {
 				http.NotFound(w, r)
 				return

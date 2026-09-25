@@ -155,7 +155,7 @@ func (s *Server) pushEvent(stream Stream, setJWS string) {
 			}
 			resp, err := client.Do(req)
 			if err == nil {
-				resp.Body.Close()
+				_ = resp.Body.Close() // we don't read the body, nothing to act on if closing it fails
 				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 					return
 				}
@@ -222,7 +222,7 @@ func (s *Server) ssfPoll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	s.encodeSSFJSON(w, map[string]any{
 		"sets":          sets,
 		"moreAvailable": moreAvailable,
 	})

@@ -239,6 +239,16 @@ func (s *Server) decodeSSFJSON(r *http.Request, v any) error {
 	return json.Unmarshal(body, v)
 }
 
+// encodeSSFJSON writes v as the response body's JSON encoding, logging
+// (in debug mode) if that fails -- which can only happen once the
+// response has already started, so there's nothing left to do about it
+// besides note it happened.
+func (s *Server) encodeSSFJSON(w http.ResponseWriter, v any) {
+	if err := json.NewEncoder(w).Encode(v); err != nil && s.debug {
+		log.Printf("SSF: encoding JSON response: %v\n", err)
+	}
+}
+
 // ssfConfiguration is the SSF transmitter metadata document, published at
 // /.well-known/ssf-configuration (OpenID SSF 1.0 section 6).
 //
