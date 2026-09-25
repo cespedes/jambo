@@ -153,6 +153,12 @@ func (s *Server) ssfCreateStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client := s.clientByID(clientID)
+	if client == nil {
+		// The access token was validly issued, but the client it names has
+		// since been removed (e.g. Server.RemoveClient during a config reload).
+		s.ssfError(w, http.StatusUnauthorized, fmt.Errorf("client no longer registered"))
+		return
+	}
 
 	var req streamRequest
 	if err := s.decodeSSFJSON(r, &req); err != nil {
@@ -179,7 +185,7 @@ func (s *Server) ssfCreateStream(w http.ResponseWriter, r *http.Request) {
 	// Manager, confirmed against authentik's working SSF transmitter)
 	// expect it in events_requested/events_supported unconditionally.
 	eventsRequested := ensureVerificationEvent(req.EventsRequested)
-	eventsSupported := ensureVerificationEvent(client.ssfEventsSupported)
+	eventsSupported := ensureVerificationEvent(client.ssfEventsSupportedSnapshot())
 
 	stream := Stream{
 		StreamID:                rand.Text(),

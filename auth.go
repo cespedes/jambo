@@ -35,12 +35,7 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, c := range s.clients {
-		if c.id == clientID {
-			conn.client = c
-			break
-		}
-	}
+	conn.client = s.clientByID(clientID)
 	if conn.client == nil {
 		s.template(w, r, "error.html", map[string]string{
 			"error": fmt.Sprintf(`unknown client "%s"`, clientID),
@@ -60,7 +55,7 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 	// All other scopes are optional.
 	// If a client sends an unrecognized scope, we send an error.
 	for _, scope := range conn.scopes {
-		if !slices.Contains(scopesSupported, scope) && !slices.Contains(conn.client.allowedScopes, scope) {
+		if !slices.Contains(scopesSupported, scope) && !conn.client.hasAllowedScope(scope) {
 			s.template(w, r, "error.html", map[string]string{
 				"errorType": "Bad request",
 				"error":     `Unrecognized scope: "` + scope + `"`,
@@ -77,7 +72,7 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !slices.Contains(conn.client.allowedRedirectURIs, conn.redirectURI) {
+	if !conn.client.hasAllowedRedirectURI(conn.redirectURI) {
 		s.template(w, r, "error.html", map[string]string{
 			"error": fmt.Sprintf(`Unregistered redirect_uri ("%s")`, conn.redirectURI),
 		})
@@ -145,7 +140,7 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		Session: session,
 		Client:  conn.client.id,
 		Scopes:  conn.scopes,
-		Roles:   conn.client.allowedRoles,
+		Roles:   conn.client.allowedRolesSnapshot(),
 	}
 	req.Params = make(map[string]string)
 	for key := range r.Form {

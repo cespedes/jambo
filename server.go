@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -35,8 +36,16 @@ var _webStatic embed.FS
 var _webTemplates embed.FS
 
 type Client struct {
-	id                  string
-	secret              string
+	id     string
+	secret string
+
+	// configMu guards the four fields below. It exists because a Client
+	// returned by ReplaceClient is already reachable through s.clients --
+	// and so through a live request -- before the caller finishes calling
+	// AddAllowed*/AddSSFEventsSupported on it (see ReplaceClient's doc
+	// comment); without it, that would race with, e.g., auth.go reading
+	// allowedScopes to validate a concurrent /auth request.
+	configMu            sync.RWMutex
 	allowedRedirectURIs []string
 	allowedScopes       []string // allowed extra scopes
 	allowedRoles        []string // if empty, any user is allowed
@@ -126,12 +135,31 @@ func (s *Server) SetSSFAllowPrivatePush(allow bool) {
 
 // clientByID returns the registered Client with the given id, or nil if none matches.
 func (s *Server) clientByID(id string) *Client {
+	s.Lock()
+	defer s.Unlock()
+	return s.clientByIDLocked(id)
+}
+
+// clientByIDLocked is clientByID for callers that already hold s.Mutex.
+func (s *Server) clientByIDLocked(id string) *Client {
 	for _, c := range s.clients {
 		if c.id == id {
 			return c
 		}
 	}
 	return nil
+}
+
+// removeClientLocked removes the client with the given id from s.clients,
+// if any. The caller must hold s.Mutex.
+func (s *Server) removeClientLocked(id string) bool {
+	for i, c := range s.clients {
+		if c.id == id {
+			s.clients = append(s.clients[:i], s.clients[i+1:]...)
+			return true
+		}
+	}
+	return false
 }
 
 func NewServer(issuer, root string) *Server {
@@ -328,6 +356,8 @@ func (s *Server) GetConnection(r *http.Request) *Connection {
 }
 
 func (s *Server) NewClient(name, secret string) *Client {
+	s.Lock()
+	defer s.Unlock()
 	c := &Client{
 		id:     name,
 		secret: secret,
@@ -336,12 +366,105 @@ func (s *Server) NewClient(name, secret string) *Client {
 	return c
 }
 
+// RemoveClient removes a previously registered client, so it can no
+// longer authenticate, be looked up by /auth or /token, or call the SSF
+// management API, and deletes that client id's refresh tokens and SSF
+// streams from Storage. It returns false if no client with that id was
+// registered (Storage is not touched in that case).
+//
+// It is safe to call while the Server is serving requests (e.g. to apply
+// a reloaded configuration without restarting), but it does not reach
+// into anything already in flight: an in-progress Connection (a pending
+// /auth/login) keeps its own pointer to the Client it started with and
+// is unaffected, and neither are already-issued access/ID tokens -- they
+// simply stop working the next time something needs to look the client
+// up again (redeeming a code or refresh token, or calling an SSF
+// endpoint). The Storage deletion is best-effort: a failure is logged
+// when SetDebug(true) is in effect but otherwise not surfaced, since
+// RemoveClient's own bool return has no room for a second error.
+//
+// This is a hard delete precisely so that a client id can be reused
+// later (e.g. NewClient after RemoveClient, for an unrelated client)
+// without inheriting whatever the previous occupant of that id left
+// behind. A host that instead wants to reconfigure the *same* client --
+// keeping its refresh tokens and SSF streams -- should call
+// ReplaceClient, not RemoveClient followed by NewClient.
+func (s *Server) RemoveClient(id string) bool {
+	s.Lock()
+	removed := s.removeClientLocked(id)
+	s.Unlock()
+	if !removed {
+		return false
+	}
+
+	if err := s.storage.DeleteRefreshTokensForClient(id); err != nil && s.debug {
+		log.Printf("RemoveClient(%q): deleting refresh tokens: %v\n", id, err)
+	}
+	streams, err := s.storage.ListStreams(id)
+	if err != nil {
+		if s.debug {
+			log.Printf("RemoveClient(%q): listing SSF streams: %v\n", id, err)
+		}
+		return true
+	}
+	for _, stream := range streams {
+		if err := s.storage.DeleteStream(stream.StreamID); err != nil && s.debug {
+			log.Printf("RemoveClient(%q): deleting SSF stream %s: %v\n", id, stream.StreamID, err)
+		}
+	}
+	return true
+}
+
+// ReplaceClient atomically removes any existing client registered under
+// id and registers a fresh one in its place, exactly as NewClient would
+// if none existed. Use it to apply a changed configuration -- a
+// different secret, redirect URIs, scopes, roles or SSF events -- to a
+// client id without restarting the Server: the caller still needs to
+// call AddAllowedRedirectURIs and any other AddAllowed*/
+// AddSSFEventsSupported on the returned Client, exactly as after
+// NewClient, since none of the old Client's configuration carries over.
+//
+// Unlike RemoveClient, ReplaceClient does not touch that client id's
+// state in Storage (refresh tokens, SSF streams): it stays there,
+// keyed by the client id string rather than by the *Client value, and
+// remains reachable through the new Client -- e.g. a receiver's existing
+// SSF stream survives its client's redirect_uri or scopes being edited
+// and reloaded. Only use ReplaceClient to reconfigure what is still
+// conceptually the same client; to repurpose an id for an unrelated one,
+// call RemoveClient (which does delete that state) and then NewClient.
+func (s *Server) ReplaceClient(id, secret string) *Client {
+	s.Lock()
+	defer s.Unlock()
+	s.removeClientLocked(id)
+	c := &Client{id: id, secret: secret}
+	s.clients = append(s.clients, c)
+	return c
+}
+
 func (c *Client) AddAllowedRedirectURIs(names ...string) {
+	c.configMu.Lock()
+	defer c.configMu.Unlock()
 	c.allowedRedirectURIs = append(c.allowedRedirectURIs, names...)
 }
 
+// hasAllowedRedirectURI reports whether uri is one of c's allowed redirect URIs.
+func (c *Client) hasAllowedRedirectURI(uri string) bool {
+	c.configMu.RLock()
+	defer c.configMu.RUnlock()
+	return slices.Contains(c.allowedRedirectURIs, uri)
+}
+
 func (c *Client) AddAllowedScopes(names ...string) {
+	c.configMu.Lock()
+	defer c.configMu.Unlock()
 	c.allowedScopes = append(c.allowedScopes, names...)
+}
+
+// hasAllowedScope reports whether scope is one of c's allowed extra scopes.
+func (c *Client) hasAllowedScope(scope string) bool {
+	c.configMu.RLock()
+	defer c.configMu.RUnlock()
+	return slices.Contains(c.allowedScopes, scope)
 }
 
 // AddAllowedRoles adds one or more roles to the list of the
@@ -349,7 +472,17 @@ func (c *Client) AddAllowedScopes(names ...string) {
 // can log in.  If there is at least one, the users must belong to one
 // of them.
 func (c *Client) AddAllowedRoles(names ...string) {
+	c.configMu.Lock()
+	defer c.configMu.Unlock()
 	c.allowedRoles = append(c.allowedRoles, names...)
+}
+
+// allowedRolesSnapshot returns a copy of c's allowed roles, safe to keep
+// and use after this call returns even if c's configuration changes later.
+func (c *Client) allowedRolesSnapshot() []string {
+	c.configMu.RLock()
+	defer c.configMu.RUnlock()
+	return slices.Clone(c.allowedRoles)
 }
 
 //	allowedScopes         []string // allowed extra scopes

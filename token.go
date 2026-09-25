@@ -64,12 +64,11 @@ func (s *Server) authenticateClient(r *http.Request) (*Client, error) {
 		clientSecret = r.PostFormValue("client_secret")
 	}
 
-	for _, c := range s.clients {
-		if c.id == clientID && subtle.ConstantTimeCompare([]byte(c.secret), []byte(clientSecret)) == 1 {
-			return c, nil
-		}
+	c := s.clientByID(clientID)
+	if c == nil || subtle.ConstantTimeCompare([]byte(c.secret), []byte(clientSecret)) != 1 {
+		return nil, fmt.Errorf("invalid client credentials")
 	}
-	return nil, fmt.Errorf("invalid client credentials")
+	return c, nil
 }
 
 func (s *Server) tokenAuthorizationCode(w http.ResponseWriter, r *http.Request) {

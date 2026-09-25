@@ -59,7 +59,18 @@ const (
 // both requested by the receiver when the stream is created and declared
 // supported here.
 func (c *Client) AddSSFEventsSupported(events ...string) {
+	c.configMu.Lock()
+	defer c.configMu.Unlock()
 	c.ssfEventsSupported = append(c.ssfEventsSupported, events...)
+}
+
+// ssfEventsSupportedSnapshot returns a copy of c's supported SSF event
+// types, safe to keep and use after this call returns even if c's
+// configuration changes later.
+func (c *Client) ssfEventsSupportedSnapshot() []string {
+	c.configMu.RLock()
+	defer c.configMu.RUnlock()
+	return slices.Clone(c.ssfEventsSupported)
 }
 
 // Subject identifies the principal a Security Event Token is about,

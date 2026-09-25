@@ -16,6 +16,11 @@ type Storage interface {
 	SaveRefreshToken(rt RefreshToken) error
 	GetRefreshToken(token string) (rt RefreshToken, ok bool, err error)
 	DeleteRefreshToken(token string) error
+	// DeleteRefreshTokensForClient removes every refresh token issued to
+	// clientID. Server.RemoveClient calls this, so a client id that gets
+	// reused later (e.g. NewClient after RemoveClient) never silently
+	// inherits tokens issued to whatever previously had that id.
+	DeleteRefreshTokensForClient(clientID string) error
 
 	SaveStream(stream Stream) error
 	GetStream(streamID string) (stream Stream, ok bool, err error)
@@ -70,6 +75,17 @@ func (m *MemoryStorage) DeleteRefreshToken(token string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.refreshTokens, token)
+	return nil
+}
+
+func (m *MemoryStorage) DeleteRefreshTokensForClient(clientID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for token, rt := range m.refreshTokens {
+		if rt.ClientID == clientID {
+			delete(m.refreshTokens, token)
+		}
+	}
 	return nil
 }
 

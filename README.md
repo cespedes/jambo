@@ -100,6 +100,34 @@ which is configured to authenticate using Jambo, our OpenID Connect provider.
   claims (login, name, e-mail...) depending on the requested scopes.
 - GitLab receives the response and sends Alice the GitLab page, already authenticated.
 
+# Reconfiguring clients at runtime
+
+`Server.RemoveClient(id)` and `Server.ReplaceClient(id, secret)` let a host
+application apply a changed configuration -- e.g. reloaded from a config
+file on `SIGHUP` -- to a `Server` that's already serving requests, without
+restarting it:
+
+```go
+client := s.ReplaceClient(clientID, newSecret) // drops the old one first, if any
+client.AddAllowedRedirectURIs(newRedirectURIs...)
+client.AddAllowedScopes(newScopes...)
+```
+
+`ReplaceClient` only replaces the `*Client` itself; any refresh tokens or
+SSF streams already created under that client id are untouched (they're
+keyed by the id string, not by the `*Client` value) and remain reachable
+through the newly configured client -- use it when the config change is
+still, conceptually, the same client.
+
+`Server.RemoveClient(id)` is a hard delete instead: besides removing the
+client itself, it also deletes that client id's refresh tokens and SSF
+streams from `Storage`, precisely so that reusing the same id later (e.g.
+`NewClient` for a completely unrelated client) starts clean rather than
+silently inheriting whatever the previous occupant of that id left
+behind. Existing tokens and Connections it already handed out keep
+working until they'd next need the client looked up again, but no new
+`/auth` or `/token` request will find it.
+
 # Shared Signals Framework (SSF)
 
 Jambo can also act as an SSF transmitter (OpenID Shared Signals Framework
