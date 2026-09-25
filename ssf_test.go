@@ -220,8 +220,11 @@ func TestSSFPushDelivery(t *testing.T) {
 	body := ssfExchangeCode(t, s, "openid ssf.manage ssf.read")
 	accessToken, _ := body["access_token"].(string)
 
+	// Stream creation itself triggers an immediate verification push (see
+	// ssfCreateStream), so the receiver gets more than one delivery; collect
+	// them all instead of assuming a single one.
 	var mu sync.Mutex
-	var received string
+	var received []string
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if ct := r.Header.Get("Content-Type"); ct != "application/secevent+jwt" {
 			t.Errorf("push request Content-Type = %q, want application/secevent+jwt", ct)
@@ -231,7 +234,7 @@ func TestSSFPushDelivery(t *testing.T) {
 			t.Errorf("reading push request body: %v", err)
 		}
 		mu.Lock()
-		received = string(b)
+		received = append(received, string(b))
 		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -249,8 +252,8 @@ func TestSSFPushDelivery(t *testing.T) {
 		t.Fatalf("POST /ssf/stream: missing stream_id in %v", streamResp)
 	}
 	delivered, _ := streamResp["events_delivered"].([]any)
-	if len(delivered) != 1 || delivered[0] != EventCAEPSessionRevoked {
-		t.Errorf("events_delivered = %v, want [%s]", delivered, EventCAEPSessionRevoked)
+	if len(delivered) != 2 || delivered[0] != EventCAEPSessionRevoked || delivered[1] != eventSSFVerification {
+		t.Errorf("events_delivered = %v, want [%s %s]", delivered, EventCAEPSessionRevoked, eventSSFVerification)
 	}
 
 	subject := Subject{Format: SubjectFormatEmail, Email: "alice@example.com"}
@@ -263,23 +266,132 @@ func TestSSFPushDelivery(t *testing.T) {
 		t.Fatalf("EmitSecurityEvent: %v", err)
 	}
 
+	// Wait for the session-revoked SET specifically: the verification push
+	// from stream creation may arrive before or after it.
+	var eventClaims map[string]any
 	waitFor(t, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		return received != ""
+		for _, set := range received {
+			claims := verifySET(t, s, set)
+			events, _ := claims["events"].(map[string]any)
+			if ec, ok := events[EventCAEPSessionRevoked].(map[string]any); ok {
+				eventClaims = ec
+				return true
+			}
+		}
+		return false
 	})
-
-	mu.Lock()
-	set := received
-	mu.Unlock()
-	claims := verifySET(t, s, set)
-	events, _ := claims["events"].(map[string]any)
-	eventClaims, ok := events[EventCAEPSessionRevoked].(map[string]any)
-	if !ok {
-		t.Fatalf("SET events = %v, missing %s", events, EventCAEPSessionRevoked)
-	}
 	if eventClaims["reason"] != "logout" {
 		t.Errorf("event claims = %v, want reason=logout", eventClaims)
+	}
+}
+
+// TestSSFAcceptsRealWorldReceiverPayload replays the exact shape of stream
+// creation request Apple Business Manager sends in practice: it uses the
+// pre-SSF-1.0 RISC delivery method URL rather than the RFC-numbered URN,
+// sets "aud" to its own receiver feed URL (not the OAuth client_id), and
+// includes a stream-level "format". All three tripped up earlier code.
+func TestSSFAcceptsRealWorldReceiverPayload(t *testing.T) {
+	s := newSSFTestServer(t)
+	body := ssfExchangeCode(t, s, "openid ssf.manage ssf.read")
+	accessToken, _ := body["access_token"].(string)
+
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer receiver.Close()
+
+	receiverAud := "https://federation.apple.com/feeds/business/caep/2034455812/7f122ed0-326e-4159-a155-b8e5623c3b4f"
+	status, streamResp := ssfDo(t, s, http.MethodPost, "/ssf/stream", accessToken, map[string]any{
+		"aud": []string{receiverAud},
+		"delivery": map[string]any{
+			"method":       "https://schemas.openid.net/secevent/risc/delivery-method/push",
+			"endpoint_url": receiver.URL,
+		},
+		"events_requested": []string{EventCAEPCredentialChange, EventCAEPSessionRevoked},
+		"format":           "iss_sub",
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("POST /ssf/stream: status = %d, body = %v", status, streamResp)
+	}
+	aud, _ := streamResp["aud"].([]any)
+	if len(aud) != 1 || aud[0] != receiverAud {
+		t.Errorf("aud = %v, want [%s]", aud, receiverAud)
+	}
+	if streamResp["format"] != "iss_sub" {
+		t.Errorf(`format = %v, want "iss_sub"`, streamResp["format"])
+	}
+}
+
+// TestSSFDeleteAcceptsStreamIDInBody guards against a regression where a
+// receiver (observed: Apple Business Manager) sends stream_id in a JSON
+// body on DELETE /ssf/stream instead of as a ?stream_id= query parameter.
+func TestSSFDeleteAcceptsStreamIDInBody(t *testing.T) {
+	s := newSSFTestServer(t)
+	body := ssfExchangeCode(t, s, "openid ssf.manage ssf.read")
+	accessToken, _ := body["access_token"].(string)
+
+	status, streamResp := ssfDo(t, s, http.MethodPost, "/ssf/stream", accessToken, streamRequest{
+		Delivery:        Delivery{Method: deliveryMethodPoll},
+		EventsRequested: []string{EventCAEPSessionRevoked},
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("POST /ssf/stream: status = %d, body = %v", status, streamResp)
+	}
+	streamID, _ := streamResp["stream_id"].(string)
+
+	status, delResp := ssfDo(t, s, http.MethodDelete, "/ssf/stream", accessToken, map[string]any{"stream_id": streamID})
+	if status != http.StatusNoContent {
+		t.Fatalf("DELETE /ssf/stream with stream_id in body: status = %d, body = %v", status, delResp)
+	}
+
+	status, _ = ssfDo(t, s, http.MethodGet, "/ssf/stream?stream_id="+streamID, accessToken, nil)
+	if status != http.StatusNotFound {
+		t.Errorf("GET /ssf/stream after delete: status = %d, want 404", status)
+	}
+}
+
+// TestSSFNoIdentifierFallsBackToSoleStream guards against a regression
+// where a receiver (observed: Apple Business Manager) calls DELETE
+// /ssf/stream, GET /ssf/status and POST /ssf/verify with no stream
+// identifier at all -- neither a query parameter nor a JSON body --
+// relying on there being exactly one stream for its client.
+func TestSSFNoIdentifierFallsBackToSoleStream(t *testing.T) {
+	s := newSSFTestServer(t)
+	body := ssfExchangeCode(t, s, "openid ssf.manage ssf.read")
+	accessToken, _ := body["access_token"].(string)
+
+	status, streamResp := ssfDo(t, s, http.MethodPost, "/ssf/stream", accessToken, streamRequest{
+		Delivery:        Delivery{Method: deliveryMethodPoll},
+		EventsRequested: []string{EventCAEPSessionRevoked},
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("POST /ssf/stream: status = %d, body = %v", status, streamResp)
+	}
+	streamID, _ := streamResp["stream_id"].(string)
+
+	status, statusResp := ssfDo(t, s, http.MethodGet, "/ssf/status", accessToken, nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET /ssf/status with no identifier: status = %d, body = %v", status, statusResp)
+	}
+	if statusResp["stream_id"] != streamID {
+		t.Errorf("GET /ssf/status with no identifier resolved to stream_id = %v, want %s", statusResp["stream_id"], streamID)
+	}
+
+	status, verifyResp := ssfDo(t, s, http.MethodPost, "/ssf/verify", accessToken, nil)
+	if status != http.StatusNoContent {
+		t.Fatalf("POST /ssf/verify with no identifier: status = %d, body = %v", status, verifyResp)
+	}
+
+	status, delResp := ssfDo(t, s, http.MethodDelete, "/ssf/stream", accessToken, nil)
+	if status != http.StatusNoContent {
+		t.Fatalf("DELETE /ssf/stream with no identifier: status = %d, body = %v", status, delResp)
+	}
+
+	status, _ = ssfDo(t, s, http.MethodGet, "/ssf/stream?stream_id="+streamID, accessToken, nil)
+	if status != http.StatusNotFound {
+		t.Errorf("GET /ssf/stream after delete: status = %d, want 404", status)
 	}
 }
 
@@ -374,6 +486,20 @@ func TestSSFPushRevalidatesEndpointBeforeDelivery(t *testing.T) {
 	}
 	streamID, _ := streamResp["stream_id"].(string)
 
+	// Stream creation triggers its own immediate verification push (see
+	// ssfCreateStream). Wait for it to land and reset the hit count before
+	// touching s.allowInsecureSSFPush below: otherwise that write races
+	// with the verification push's goroutine reading the same field, and
+	// its hit would also contaminate the assertion at the end of this test.
+	waitFor(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return hits > 0
+	})
+	mu.Lock()
+	hits = 0
+	mu.Unlock()
+
 	subject := Subject{Format: SubjectFormatEmail, Email: "alice@example.com"}
 	if status, _ := ssfDo(t, s, http.MethodPost, "/ssf/subjects:add", accessToken, subjectRequest{StreamID: streamID, Subject: subject}); status != http.StatusNoContent {
 		t.Fatalf("POST /ssf/subjects:add: status = %d", status)
@@ -427,28 +553,35 @@ func TestSSFPollDelivery(t *testing.T) {
 		t.Fatalf("EmitSecurityEvent: %v", err)
 	}
 
+	// Stream creation itself queues an immediate verification event (see
+	// ssfCreateStream), so two events are pending: that one and the
+	// credential-change event just emitted.
 	pollPath := fmt.Sprintf("/ssf/poll/%s", streamID)
 	status, pollResp := ssfDo(t, s, http.MethodPost, pollPath, accessToken, map[string]any{"maxEvents": 10})
 	if status != http.StatusOK {
 		t.Fatalf("POST %s: status = %d, body = %v", pollPath, status, pollResp)
 	}
 	sets, _ := pollResp["sets"].(map[string]any)
-	if len(sets) != 1 {
-		t.Fatalf("poll sets = %v, want exactly 1 event", sets)
+	if len(sets) != 2 {
+		t.Fatalf("poll sets = %v, want exactly 2 events", sets)
 	}
-	var jti, set string
-	for k, v := range sets {
-		jti = k
-		set, _ = v.(string)
+	var jtis []string
+	var credentialChangeJTI string
+	for jti, v := range sets {
+		jtis = append(jtis, jti)
+		set, _ := v.(string)
+		claims := verifySET(t, s, set)
+		events, _ := claims["events"].(map[string]any)
+		if _, ok := events[EventCAEPCredentialChange]; ok {
+			credentialChangeJTI = jti
+		}
 	}
-	claims := verifySET(t, s, set)
-	events, _ := claims["events"].(map[string]any)
-	if _, ok := events[EventCAEPCredentialChange]; !ok {
-		t.Fatalf("SET events = %v, missing %s", events, EventCAEPCredentialChange)
+	if credentialChangeJTI == "" {
+		t.Fatalf("poll sets = %v, missing an event of type %s", sets, EventCAEPCredentialChange)
 	}
 
-	// Ack it, then polling again should return nothing.
-	status, pollResp = ssfDo(t, s, http.MethodPost, pollPath, accessToken, map[string]any{"ack": []string{jti}})
+	// Ack both, then polling again should return nothing.
+	status, pollResp = ssfDo(t, s, http.MethodPost, pollPath, accessToken, map[string]any{"ack": jtis})
 	if status != http.StatusOK {
 		t.Fatalf("POST %s (ack): status = %d, body = %v", pollPath, status, pollResp)
 	}

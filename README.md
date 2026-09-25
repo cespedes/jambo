@@ -140,6 +140,13 @@ which signs a Security Event Token and delivers it to every enabled
 stream of that client that requested the event type and has that subject
 registered.
 
+Every stream also implicitly supports the built-in "verification" event
+type, regardless of what the receiver asked for, and Jambo pushes one
+right after creating the stream, without being asked: several real
+receivers (Apple Business Manager among them) wait to receive this before
+considering the stream successfully set up, rather than calling
+`/ssf/verify` themselves.
+
 **Trust model for `/ssf/subjects:add`:** a receiver registers which
 subjects it wants events about itself, via its own `ssf.manage`-scoped
 token -- Jambo does not check that the subject has ever actually

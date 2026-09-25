@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -56,18 +57,88 @@ func intersect(a, b []string) []string {
 	return out
 }
 
+// ensureVerificationEvent returns eventTypes with eventSSFVerification
+// appended, unless it's already present.
+func ensureVerificationEvent(eventTypes []string) []string {
+	if slices.Contains(eventTypes, eventSSFVerification) {
+		return eventTypes
+	}
+	return append(append([]string{}, eventTypes...), eventSSFVerification)
+}
+
 type streamRequest struct {
-	StreamID        string   `json:"stream_id,omitempty"`
-	Delivery        Delivery `json:"delivery"`
-	EventsRequested []string `json:"events_requested"`
-	Description     string   `json:"description,omitempty"`
+	StreamID        string       `json:"stream_id,omitempty"`
+	Aud             audienceList `json:"aud,omitempty"`
+	Delivery        Delivery     `json:"delivery"`
+	EventsRequested []string     `json:"events_requested"`
+	Description     string       `json:"description,omitempty"`
+	Format          string       `json:"format,omitempty"`
+}
+
+// streamIDFromRequest returns "stream_id" from the query string
+// (?stream_id=...) if present, falling back to a JSON request body
+// {"stream_id": "..."}: some receivers (Apple Business Manager, observed
+// on DELETE) send it there instead, even for methods that would
+// conventionally use a query parameter.
+func (s *Server) streamIDFromRequest(r *http.Request) string {
+	if id := r.URL.Query().Get("stream_id"); id != "" {
+		return id
+	}
+	var body struct {
+		StreamID string `json:"stream_id"`
+	}
+	_ = s.decodeSSFJSON(r, &body)
+	return body.StreamID
+}
+
+// soleStreamForClient returns clientID's only stream, if it has exactly
+// one. Some receivers (Apple Business Manager, observed on DELETE) send
+// no stream identifier at all on GET/DELETE calls, relying on the
+// invariant -- true for a receiver like it, which manages a single
+// stream -- that there's exactly one stream to act on.
+func (s *Server) soleStreamForClient(clientID string) (Stream, bool, error) {
+	streams, err := s.storage.ListStreams(clientID)
+	if err != nil {
+		return Stream{}, false, err
+	}
+	if len(streams) != 1 {
+		return Stream{}, false, nil
+	}
+	return streams[0], true, nil
+}
+
+// resolveStreamID returns streamID (typically already read from a decoded
+// JSON body) if non-empty, otherwise falls back to the ?stream_id= query
+// parameter and finally to soleStreamForClient. badRequest is non-nil
+// exactly when no stream could be identified at all -- callers should
+// report that as a 400; err is non-nil only on a genuine storage failure
+// and should be reported as a 500.
+//
+// Callers that need other fields from the same JSON body must decode it
+// themselves and pass the resulting stream_id in, rather than have this
+// read the body again: an http.Request's body can only be read once.
+func (s *Server) resolveStreamID(r *http.Request, clientID, streamID string) (id string, badRequest, err error) {
+	if streamID == "" {
+		streamID = r.URL.Query().Get("stream_id")
+	}
+	if streamID != "" {
+		return streamID, nil, nil
+	}
+	sole, ok, err := s.soleStreamForClient(clientID)
+	if err != nil {
+		return "", nil, err
+	}
+	if !ok {
+		return "", fmt.Errorf("stream_id is required (client has zero or multiple streams)"), nil
+	}
+	return sole.StreamID, nil, nil
 }
 
 func (s *Server) validateDelivery(d Delivery) error {
-	switch d.Method {
-	case deliveryMethodPush:
+	switch {
+	case isPushDeliveryMethod(d.Method):
 		return isSafePushURL(d.EndpointURL, s.allowInsecureSSFPush)
-	case deliveryMethodPoll:
+	case isPollDeliveryMethod(d.Method):
 		return nil
 	default:
 		return fmt.Errorf("unsupported delivery method %q", d.Method)
@@ -84,7 +155,7 @@ func (s *Server) ssfCreateStream(w http.ResponseWriter, r *http.Request) {
 	client := s.clientByID(clientID)
 
 	var req streamRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := s.decodeSSFJSON(r, &req); err != nil {
 		s.ssfError(w, http.StatusBadRequest, fmt.Errorf("malformed JSON body: %w", err))
 		return
 	}
@@ -93,20 +164,38 @@ func (s *Server) ssfCreateStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// "aud" identifies the receiver, not the OAuth client: a receiver like
+	// Apple Business Manager sets it to its own feed URL, not to its
+	// client_id, so it can recognize SETs addressed to it. Honor whatever
+	// the (already-authenticated) receiver asked for, falling back to the
+	// client ID only if it didn't send one.
+	aud := []string(req.Aud)
+	if len(aud) == 0 {
+		aud = []string{client.id}
+	}
+
+	// Every stream supports the built-in verification event, whether or
+	// not the receiver asked for it: real receivers (Apple Business
+	// Manager, confirmed against authentik's working SSF transmitter)
+	// expect it in events_requested/events_supported unconditionally.
+	eventsRequested := ensureVerificationEvent(req.EventsRequested)
+	eventsSupported := ensureVerificationEvent(client.ssfEventsSupported)
+
 	stream := Stream{
 		StreamID:                rand.Text(),
 		Iss:                     s.issuer,
-		Aud:                     []string{client.id},
-		EventsSupported:         client.ssfEventsSupported,
-		EventsRequested:         req.EventsRequested,
-		EventsDelivered:         intersect(req.EventsRequested, client.ssfEventsSupported),
+		Aud:                     aud,
+		EventsSupported:         eventsSupported,
+		EventsRequested:         eventsRequested,
+		EventsDelivered:         intersect(eventsRequested, eventsSupported),
 		Delivery:                req.Delivery,
 		Description:             req.Description,
+		Format:                  req.Format,
 		MinVerificationInterval: 300,
 		ClientID:                client.id,
 		Status:                  StreamStatusEnabled,
 	}
-	if stream.Delivery.Method == deliveryMethodPoll {
+	if isPollDeliveryMethod(stream.Delivery.Method) {
 		// The transmitter, not the receiver, dictates the poll URL.
 		stream.Delivery.EndpointURL = s.issuer + "/ssf/poll/" + stream.StreamID
 	}
@@ -116,11 +205,25 @@ func (s *Server) ssfCreateStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.debug {
+		log.Printf("SSF: created stream %s for client %s (delivery=%s, events_requested=%v, events_delivered=%v)\n",
+			stream.StreamID, client.id, stream.Delivery.Method, stream.EventsRequested, stream.EventsDelivered)
+	}
+
+	// Proactively push a verification SET right after creation, without
+	// waiting for the receiver to call /ssf/verify: this is what a real
+	// receiver (observed: Apple Business Manager) actually waits on to
+	// consider the stream successfully set up, per authentik's transmitter.
+	if err := s.deliverEvent(stream, eventSSFVerification, Subject{Format: SubjectFormatOpaque, ID: stream.StreamID}, nil); err != nil && s.debug {
+		log.Printf("SSF: failed to send initial verification event for stream %s: %v\n", stream.StreamID, err)
+	}
 	s.writeStreamJSON(w, http.StatusCreated, stream)
 }
 
-// ssfGetStream handles "GET /ssf/stream". With no stream_id query
-// parameter it lists every stream belonging to the caller's client.
+// ssfGetStream handles "GET /ssf/stream". With no stream_id given, it
+// returns the caller's one stream if it has exactly one (some receivers,
+// e.g. Apple Business Manager, rely on that instead of naming it), or
+// otherwise lists every stream belonging to the caller's client.
 func (s *Server) ssfGetStream(w http.ResponseWriter, r *http.Request) {
 	clientID, err := s.requireSSFScope(r, "ssf.manage", "ssf.read")
 	if err != nil {
@@ -128,33 +231,40 @@ func (s *Server) ssfGetStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if streamID := r.URL.Query().Get("stream_id"); streamID != "" {
-		stream, ok, err := s.storage.GetStream(streamID)
+	streamID := s.streamIDFromRequest(r)
+	if streamID == "" {
+		if sole, ok, err := s.soleStreamForClient(clientID); err != nil {
+			http.Error(w, "Internal server error listing streams.", http.StatusInternalServerError)
+			return
+		} else if ok {
+			s.writeStreamJSON(w, http.StatusOK, sole)
+			return
+		}
+
+		streams, err := s.storage.ListStreams(clientID)
 		if err != nil {
-			http.Error(w, "Internal server error reading stream.", http.StatusInternalServerError)
+			http.Error(w, "Internal server error listing streams.", http.StatusInternalServerError)
 			return
 		}
-		if !ok || stream.ClientID != clientID {
-			s.ssfError(w, http.StatusNotFound, fmt.Errorf("unknown stream_id"))
-			return
+		// The spec is not precise about the envelope for a multi-stream
+		// listing; this array-under-"streams" shape is Jambo's own choice.
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string][]Stream{"streams": streams}); err != nil {
+			http.Error(w, "Internal server error marshaling streams.", http.StatusInternalServerError)
 		}
-		s.writeStreamJSON(w, http.StatusOK, stream)
 		return
 	}
 
-	streams, err := s.storage.ListStreams(clientID)
+	stream, ok, err := s.storage.GetStream(streamID)
 	if err != nil {
-		http.Error(w, "Internal server error listing streams.", http.StatusInternalServerError)
+		http.Error(w, "Internal server error reading stream.", http.StatusInternalServerError)
 		return
 	}
-	// The spec is not precise about the envelope for a multi-stream listing
-	// (a real receiver such as Apple Business Manager is expected to always
-	// know its own stream_id and use the single-stream path above); this
-	// array-under-"streams" shape is Jambo's own choice.
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string][]Stream{"streams": streams}); err != nil {
-		http.Error(w, "Internal server error marshaling streams.", http.StatusInternalServerError)
+	if !ok || stream.ClientID != clientID {
+		s.ssfError(w, http.StatusNotFound, fmt.Errorf("unknown stream_id"))
+		return
 	}
+	s.writeStreamJSON(w, http.StatusOK, stream)
 }
 
 // ssfUpdateStream handles "PATCH /ssf/stream": only fields present in the
@@ -177,7 +287,7 @@ func (s *Server) ssfModifyStream(w http.ResponseWriter, r *http.Request, replace
 	}
 
 	var req streamRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := s.decodeSSFJSON(r, &req); err != nil {
 		s.ssfError(w, http.StatusBadRequest, fmt.Errorf("malformed JSON body: %w", err))
 		return
 	}
@@ -201,13 +311,16 @@ func (s *Server) ssfModifyStream(w http.ResponseWriter, r *http.Request, replace
 			return
 		}
 		stream.Delivery = req.Delivery
-		if stream.Delivery.Method == deliveryMethodPoll {
+		if isPollDeliveryMethod(stream.Delivery.Method) {
 			stream.Delivery.EndpointURL = s.issuer + "/ssf/poll/" + stream.StreamID
 		}
 	}
+	if replace || len(req.Aud) > 0 {
+		stream.Aud = req.Aud
+	}
 	if replace || req.EventsRequested != nil {
-		stream.EventsRequested = req.EventsRequested
-		stream.EventsDelivered = intersect(req.EventsRequested, stream.EventsSupported)
+		stream.EventsRequested = ensureVerificationEvent(req.EventsRequested)
+		stream.EventsDelivered = intersect(stream.EventsRequested, stream.EventsSupported)
 	}
 	if replace || req.Description != "" {
 		stream.Description = req.Description
@@ -222,14 +335,25 @@ func (s *Server) ssfModifyStream(w http.ResponseWriter, r *http.Request, replace
 	s.writeStreamJSON(w, http.StatusOK, stream)
 }
 
-// ssfDeleteStream handles "DELETE /ssf/stream?stream_id=...".
+// ssfDeleteStream handles "DELETE /ssf/stream", identifying the stream
+// via ?stream_id=..., a {"stream_id": "..."} JSON body, or -- if neither
+// is given and the caller's client has exactly one stream, as observed
+// with Apple Business Manager -- that one stream.
 func (s *Server) ssfDeleteStream(w http.ResponseWriter, r *http.Request) {
 	clientID, err := s.requireSSFScope(r, "ssf.manage")
 	if err != nil {
 		s.ssfError(w, http.StatusUnauthorized, err)
 		return
 	}
-	streamID := r.URL.Query().Get("stream_id")
+	streamID, badRequest, err := s.resolveStreamID(r, clientID, s.streamIDFromRequest(r))
+	if err != nil {
+		http.Error(w, "Internal server error listing streams.", http.StatusInternalServerError)
+		return
+	}
+	if badRequest != nil {
+		s.ssfError(w, http.StatusBadRequest, badRequest)
+		return
+	}
 	stream, ok, err := s.storage.GetStream(streamID)
 	if err != nil {
 		http.Error(w, "Internal server error reading stream.", http.StatusInternalServerError)
@@ -246,14 +370,24 @@ func (s *Server) ssfDeleteStream(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ssfGetStatus handles "GET /ssf/status?stream_id=...".
+// ssfGetStatus handles "GET /ssf/status", identifying the stream via
+// ?stream_id=..., a {"stream_id": "..."} JSON body, or -- if neither is
+// given and the caller's client has exactly one stream -- that one stream.
 func (s *Server) ssfGetStatus(w http.ResponseWriter, r *http.Request) {
 	clientID, err := s.requireSSFScope(r, "ssf.manage", "ssf.read")
 	if err != nil {
 		s.ssfError(w, http.StatusUnauthorized, err)
 		return
 	}
-	streamID := r.URL.Query().Get("stream_id")
+	streamID, badRequest, err := s.resolveStreamID(r, clientID, s.streamIDFromRequest(r))
+	if err != nil {
+		http.Error(w, "Internal server error listing streams.", http.StatusInternalServerError)
+		return
+	}
+	if badRequest != nil {
+		s.ssfError(w, http.StatusBadRequest, badRequest)
+		return
+	}
 	stream, ok, err := s.storage.GetStream(streamID)
 	if err != nil {
 		http.Error(w, "Internal server error reading stream.", http.StatusInternalServerError)
@@ -278,7 +412,7 @@ func (s *Server) ssfSetStatus(w http.ResponseWriter, r *http.Request) {
 		StreamID string `json:"stream_id"`
 		Status   string `json:"status"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := s.decodeSSFJSON(r, &body); err != nil {
 		s.ssfError(w, http.StatusBadRequest, fmt.Errorf("malformed JSON body: %w", err))
 		return
 	}
@@ -286,7 +420,16 @@ func (s *Server) ssfSetStatus(w http.ResponseWriter, r *http.Request) {
 		s.ssfError(w, http.StatusBadRequest, fmt.Errorf("invalid status %q", body.Status))
 		return
 	}
-	stream, ok, err := s.storage.GetStream(body.StreamID)
+	streamID, badRequest, err := s.resolveStreamID(r, clientID, body.StreamID)
+	if err != nil {
+		http.Error(w, "Internal server error listing streams.", http.StatusInternalServerError)
+		return
+	}
+	if badRequest != nil {
+		s.ssfError(w, http.StatusBadRequest, badRequest)
+		return
+	}
+	stream, ok, err := s.storage.GetStream(streamID)
 	if err != nil {
 		http.Error(w, "Internal server error reading stream.", http.StatusInternalServerError)
 		return
@@ -321,11 +464,20 @@ func (s *Server) ssfAddSubject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req subjectRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := s.decodeSSFJSON(r, &req); err != nil {
 		s.ssfError(w, http.StatusBadRequest, fmt.Errorf("malformed JSON body: %w", err))
 		return
 	}
-	stream, ok, err := s.storage.GetStream(req.StreamID)
+	streamID, badRequest, err := s.resolveStreamID(r, clientID, req.StreamID)
+	if err != nil {
+		http.Error(w, "Internal server error listing streams.", http.StatusInternalServerError)
+		return
+	}
+	if badRequest != nil {
+		s.ssfError(w, http.StatusBadRequest, badRequest)
+		return
+	}
+	stream, ok, err := s.storage.GetStream(streamID)
 	if err != nil {
 		http.Error(w, "Internal server error reading stream.", http.StatusInternalServerError)
 		return
@@ -352,11 +504,20 @@ func (s *Server) ssfRemoveSubject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req subjectRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := s.decodeSSFJSON(r, &req); err != nil {
 		s.ssfError(w, http.StatusBadRequest, fmt.Errorf("malformed JSON body: %w", err))
 		return
 	}
-	stream, ok, err := s.storage.GetStream(req.StreamID)
+	streamID, badRequest, err := s.resolveStreamID(r, clientID, req.StreamID)
+	if err != nil {
+		http.Error(w, "Internal server error listing streams.", http.StatusInternalServerError)
+		return
+	}
+	if badRequest != nil {
+		s.ssfError(w, http.StatusBadRequest, badRequest)
+		return
+	}
+	stream, ok, err := s.storage.GetStream(streamID)
 	if err != nil {
 		http.Error(w, "Internal server error reading stream.", http.StatusInternalServerError)
 		return
@@ -386,11 +547,22 @@ func (s *Server) ssfVerify(w http.ResponseWriter, r *http.Request) {
 		StreamID string `json:"stream_id"`
 		State    string `json:"state,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := s.decodeSSFJSON(r, &body); err != nil {
 		s.ssfError(w, http.StatusBadRequest, fmt.Errorf("malformed JSON body: %w", err))
 		return
 	}
-	stream, ok, err := s.storage.GetStream(body.StreamID)
+
+	streamID, badRequest, err := s.resolveStreamID(r, clientID, body.StreamID)
+	if err != nil {
+		http.Error(w, "Internal server error listing streams.", http.StatusInternalServerError)
+		return
+	}
+	if badRequest != nil {
+		s.ssfError(w, http.StatusBadRequest, badRequest)
+		return
+	}
+
+	stream, ok, err := s.storage.GetStream(streamID)
 	if err != nil {
 		http.Error(w, "Internal server error reading stream.", http.StatusInternalServerError)
 		return

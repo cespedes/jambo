@@ -3,6 +3,8 @@ package jambo
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"slices"
 	"strconv"
@@ -11,10 +13,28 @@ import (
 )
 
 // Shared Signals Framework (SSF) delivery methods (OpenID SSF 1.0 / RFC 8935 / RFC 8936).
+//
+// Real receivers disagree on how to spell these: the RISC-era URLs below
+// predate the SSF 1.0 spec settling on the RFC-numbered URNs, but at least
+// Apple Business Manager still sends the older spelling. Jambo accepts
+// either for both push and poll -- see isPushDeliveryMethod /
+// isPollDeliveryMethod -- and advertises all four in its own discovery
+// document.
 const (
 	deliveryMethodPush = "urn:ietf:rfc:8935"
 	deliveryMethodPoll = "urn:ietf:rfc:8936"
+
+	deliveryMethodPushRISC = "https://schemas.openid.net/secevent/risc/delivery-method/push"
+	deliveryMethodPollRISC = "https://schemas.openid.net/secevent/risc/delivery-method/poll"
 )
+
+func isPushDeliveryMethod(m string) bool {
+	return m == deliveryMethodPush || m == deliveryMethodPushRISC
+}
+
+func isPollDeliveryMethod(m string) bool {
+	return m == deliveryMethodPoll || m == deliveryMethodPollRISC
+}
 
 // CAEP (Continuous Access Evaluation Profile) event type URIs. A Client
 // only ever has events delivered on a stream if the event type is both
@@ -96,12 +116,33 @@ type Stream struct {
 	EventsDelivered         []string `json:"events_delivered"`
 	Delivery                Delivery `json:"delivery"`
 	Description             string   `json:"description,omitempty"`
+	Format                  string   `json:"format,omitempty"` // default Subject format for this stream (RFC 9493)
 	MinVerificationInterval int      `json:"min_verification_interval,omitempty"`
 
 	// Internal bookkeeping: not part of the JSON the receiver sees.
 	ClientID string    `json:"-"`
 	Status   string    `json:"-"` // "enabled", "paused" or "disabled"
 	Subjects []Subject `json:"-"`
+}
+
+// audienceList unmarshals a JSON "aud" value that, per RFC 8417, may be
+// either a single string or an array of strings; a receiver like Apple
+// Business Manager sends it as an array. It's always marshaled back out
+// as an array.
+type audienceList []string
+
+func (a *audienceList) UnmarshalJSON(data []byte) error {
+	var multi []string
+	if err := json.Unmarshal(data, &multi); err == nil {
+		*a = multi
+		return nil
+	}
+	var single string
+	if err := json.Unmarshal(data, &single); err != nil {
+		return fmt.Errorf("aud must be a string or an array of strings: %w", err)
+	}
+	*a = []string{single}
+	return nil
 }
 
 const (
@@ -156,41 +197,63 @@ func (s *Server) requireSSFScope(r *http.Request, anyOf ...string) (clientID str
 }
 
 func (s *Server) ssfError(w http.ResponseWriter, status int, err error) {
+	if s.debug {
+		log.Printf("SSF: status=%d error=%v\n", status, err)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	fmt.Fprintf(w, `{"error":%q}`+"\n", err.Error())
 }
 
-// ssfConfiguration is the SSF transmitter metadata document, published at
-// /.well-known/ssf-configuration (OpenID SSF 1.0 section 6).
-type ssfConfiguration struct {
-	Issuer                   string                   `json:"issuer"`
-	JwksURI                  string                   `json:"jwks_uri,omitempty"`
-	DeliveryMethodsSupported []string                 `json:"delivery_methods_supported,omitempty"`
-	ConfigurationEndpoint    string                   `json:"configuration_endpoint,omitempty"`
-	StatusEndpoint           string                   `json:"status_endpoint,omitempty"`
-	AddSubjectEndpoint       string                   `json:"add_subject_endpoint,omitempty"`
-	RemoveSubjectEndpoint    string                   `json:"remove_subject_endpoint,omitempty"`
-	VerificationEndpoint     string                   `json:"verification_endpoint,omitempty"`
-	AuthorizationSchemes     []ssfAuthorizationScheme `json:"authorization_schemes,omitempty"`
+// decodeSSFJSON reads r's body -- logging it first when debug logging is
+// enabled, so a failed SSF call can be diagnosed from the logs alone --
+// and decodes it as JSON into v. An empty body decodes into a zero v
+// rather than erroring, since some SSF calls (e.g. a bare poll) are valid
+// with no body at all.
+func (s *Server) decodeSSFJSON(r *http.Request, v any) error {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return fmt.Errorf("reading request body: %w", err)
+	}
+	if s.debug {
+		log.Printf("%s %s %s: body = %s\n", r.RemoteAddr, r.Method, r.URL, body)
+	}
+	if len(body) == 0 {
+		return nil
+	}
+	return json.Unmarshal(body, v)
 }
 
-type ssfAuthorizationScheme struct {
-	SpecURN string `json:"spec_urn"`
+// ssfConfiguration is the SSF transmitter metadata document, published at
+// /.well-known/ssf-configuration (OpenID SSF 1.0 section 6).
+//
+// AuthorizationSchemes is deliberately left unset: the spec does not fix a
+// registry of spec_urn values for it, and every real transmitter we could
+// find treats it as opaque or omits it, so publishing a guessed value
+// risks a receiver's validator rejecting the whole document.
+type ssfConfiguration struct {
+	Issuer                   string   `json:"issuer"`
+	JwksURI                  string   `json:"jwks_uri,omitempty"`
+	SpecVersion              string   `json:"spec_version,omitempty"`
+	DeliveryMethodsSupported []string `json:"delivery_methods_supported,omitempty"`
+	ConfigurationEndpoint    string   `json:"configuration_endpoint,omitempty"`
+	StatusEndpoint           string   `json:"status_endpoint,omitempty"`
+	AddSubjectEndpoint       string   `json:"add_subject_endpoint,omitempty"`
+	RemoveSubjectEndpoint    string   `json:"remove_subject_endpoint,omitempty"`
+	VerificationEndpoint     string   `json:"verification_endpoint,omitempty"`
 }
 
 func (s *Server) ssfConfigurationHandler(w http.ResponseWriter, r *http.Request) {
 	config := ssfConfiguration{
 		Issuer:                   s.issuer,
 		JwksURI:                  s.issuer + "/keys",
-		DeliveryMethodsSupported: []string{deliveryMethodPush, deliveryMethodPoll},
+		SpecVersion:              "1.0",
+		DeliveryMethodsSupported: []string{deliveryMethodPush, deliveryMethodPoll, deliveryMethodPushRISC, deliveryMethodPollRISC},
 		ConfigurationEndpoint:    s.issuer + "/ssf/stream",
 		StatusEndpoint:           s.issuer + "/ssf/status",
 		AddSubjectEndpoint:       s.issuer + "/ssf/subjects:add",
 		RemoveSubjectEndpoint:    s.issuer + "/ssf/subjects:remove",
 		VerificationEndpoint:     s.issuer + "/ssf/verify",
-		// RFC 6749 bearer tokens obtained through this same server's /token endpoint.
-		AuthorizationSchemes: []ssfAuthorizationScheme{{SpecURN: "urn:ietf:rfc:6749"}},
 	}
 
 	data, err := json.MarshalIndent(config, "", "  ")

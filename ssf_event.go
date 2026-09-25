@@ -54,10 +54,10 @@ func (s *Server) deliverEvent(stream Stream, eventType string, subject Subject, 
 	if err != nil {
 		return err
 	}
-	switch stream.Delivery.Method {
-	case deliveryMethodPush:
+	switch {
+	case isPushDeliveryMethod(stream.Delivery.Method):
 		s.pushEvent(stream, setJWS)
-	case deliveryMethodPoll:
+	case isPollDeliveryMethod(stream.Delivery.Method):
 		return s.storage.QueueEvent(stream.StreamID, PendingEvent{JTI: jti, SET: setJWS})
 	}
 	return nil
@@ -186,7 +186,7 @@ func (s *Server) ssfPoll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error reading stream.", http.StatusInternalServerError)
 		return
 	}
-	if !ok || stream.ClientID != clientID || stream.Delivery.Method != deliveryMethodPoll {
+	if !ok || stream.ClientID != clientID || !isPollDeliveryMethod(stream.Delivery.Method) {
 		s.ssfError(w, http.StatusNotFound, fmt.Errorf("unknown stream_id"))
 		return
 	}
@@ -197,7 +197,7 @@ func (s *Server) ssfPoll(w http.ResponseWriter, r *http.Request) {
 		SetErrs   map[string]any `json:"setErrs"`
 	}
 	// An empty body is valid (bare poll for new events).
-	_ = json.NewDecoder(r.Body).Decode(&body)
+	_ = s.decodeSSFJSON(r, &body)
 
 	for _, jti := range body.Ack {
 		_ = s.storage.AckEvent(streamID, jti)
