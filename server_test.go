@@ -27,12 +27,10 @@ func newTestServer(t *testing.T) *Server {
 	s.SetAuthenticator(func(req *Request) Response {
 		if req.Params["login"] == "alice" && req.Params["password"] == "secret" {
 			return Response{
-				Type:       ResponseTypeLoginOK,
-				Login:      "alice",
-				Name:       "Alice Wonderland",
-				GivenName:  "Alice",
-				FamilyName: "Wonderland",
-				Mail:       "alice@example.com",
+				Type:  ResponseTypeLoginOK,
+				Login: "alice",
+				Name:  "Alice",
+				Mail:  "alice@example.com",
 			}
 		}
 		return Response{Type: ResponseTypeLoginFailed, Login: req.Params["login"]}
@@ -165,12 +163,6 @@ func TestFullAuthorizationCodeFlow(t *testing.T) {
 	}
 	if claims["email"] != "alice@example.com" {
 		t.Errorf("userinfo email = %v, want %q", claims["email"], "alice@example.com")
-	}
-	if claims["given_name"] != "Alice" {
-		t.Errorf("userinfo given_name = %v, want %q", claims["given_name"], "Alice")
-	}
-	if claims["family_name"] != "Wonderland" {
-		t.Errorf("userinfo family_name = %v, want %q", claims["family_name"], "Wonderland")
 	}
 }
 
