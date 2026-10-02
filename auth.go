@@ -126,6 +126,12 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 	conn, ok := s.connections[session]
 	s.Unlock()
 
+	// Make the connection available to the templates rendered below (which
+	// show, e.g., the client's logo), even if it is no longer usable.
+	if ok {
+		r = s.SetConnection(r, &conn)
+	}
+
 	// Tell the user why the session can't be used, since the usual causes
 	// (a tab left open too long, or a form resubmitted after going back)
 	// have a different remedy than a made-up session. The session

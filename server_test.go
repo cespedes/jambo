@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
@@ -328,6 +329,63 @@ func TestUsedConnectionIsKeptButNotUsable(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "already completed") {
 		t.Errorf("logging in on a used connection: expected 'already completed' error, got: %s", body)
+	}
+}
+
+// clientAwareTemplates makes login.html and error.html print the "client"
+// template value, so a test can tell whether the Server knew the client of
+// the session when it rendered them.
+func clientAwareTemplates(t *testing.T, s *Server) {
+	t.Helper()
+	err := s.ReplacePresentation(nil, fstest.MapFS{
+		"login.html": {Data: []byte(`<input name="session" value="{{.session}}">client={{.client}}`)},
+		"error.html": {Data: []byte(`error={{.error}} client={{.client}}`)},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSessionErrorsKnowTheClient(t *testing.T) {
+	s := newTestServer(t)
+	clientAwareTemplates(t, s)
+
+	usedSession := startAuth(t, s, "openid")
+	resp := login(t, s, usedSession, "alice", "secret")
+	loc, _ := url.Parse(resp.Header.Get("Location"))
+	exchangeCode(t, s, loc.Query().Get("code"))
+
+	expiredSession := startAuth(t, s, "openid")
+	s.Lock()
+	conn := s.connections[expiredSession]
+	conn.created = time.Now().Add(-connectionTTL - time.Minute)
+	s.connections[expiredSession] = conn
+	s.Unlock()
+
+	for name, session := range map[string]string{"used": usedSession, "expired": expiredSession} {
+		resp := login(t, s, session, "alice", "secret")
+		body, _ := io.ReadAll(resp.Body)
+		if !strings.Contains(string(body), "client=test-client") {
+			t.Errorf("%s session: error page doesn't know the client, got: %s", name, body)
+		}
+	}
+
+	resp = login(t, s, "NOSUCHSESSION", "alice", "secret")
+	body, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(body), "test-client") {
+		t.Errorf("unknown session: error page names a client, got: %s", body)
+	}
+}
+
+func TestFailedLoginKnowsTheClient(t *testing.T) {
+	s := newTestServer(t)
+	clientAwareTemplates(t, s)
+	session := startAuth(t, s, "openid")
+
+	resp := login(t, s, session, "alice", "wrong")
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "client=test-client") {
+		t.Errorf("login form re-rendered after a failed login doesn't know the client, got: %s", body)
 	}
 }
 
