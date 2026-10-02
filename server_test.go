@@ -277,36 +277,90 @@ func TestExpiredConnectionIsRejected(t *testing.T) {
 		t.Fatalf("expected an error page (status 200), got %d", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "Invalid session") {
-		t.Errorf("expected 'Invalid session' error, got: %s", body)
+	if !strings.Contains(string(body), "session has expired") {
+		t.Errorf("expected 'session has expired' error, got: %s", body)
+	}
+	if strings.Contains(string(body), session) {
+		t.Errorf("error page must not echo the session identifier, got: %s", body)
 	}
 
+	// It stays available for lookups (e.g. from templates) until
+	// connectionRetention has passed.
 	s.Lock()
 	_, stillThere := s.connections[session]
 	s.Unlock()
-	if stillThere {
-		t.Error("expired connection was not purged from s.connections")
+	if !stillThere {
+		t.Error("expired connection was deleted before connectionRetention")
 	}
 }
 
-func TestExpiredConnectionsArePurgedOnNewAuth(t *testing.T) {
+func TestUsedConnectionIsKeptButNotUsable(t *testing.T) {
+	s := newTestServer(t)
+	session := startAuth(t, s, "openid")
+
+	resp := login(t, s, session, "alice", "secret")
+	loc, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil {
+		t.Fatalf("invalid redirect Location: %v", err)
+	}
+	code := loc.Query().Get("code")
+	if tokResp, tokBody := exchangeCode(t, s, code); tokResp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /token: status = %d, body = %v", tokResp.StatusCode, tokBody)
+	}
+
+	s.Lock()
+	conn, stillThere := s.connections[code]
+	s.Unlock()
+	if !stillThere {
+		t.Fatal("used connection was deleted from s.connections")
+	}
+	if !conn.used || conn.usable() {
+		t.Errorf("used connection: used = %v, usable() = %v, want true and false", conn.used, conn.usable())
+	}
+	if conn.client == nil {
+		t.Error("used connection lost its client")
+	}
+
+	if _, body := exchangeCode(t, s, code); body["error"] != "invalid_grant" {
+		t.Errorf("replaying code: error = %v, want invalid_grant", body["error"])
+	}
+	resp = login(t, s, session, "alice", "secret")
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "already completed") {
+		t.Errorf("logging in on a used connection: expected 'already completed' error, got: %s", body)
+	}
+}
+
+func TestUnknownSessionIsInvalid(t *testing.T) {
+	s := newTestServer(t)
+	resp := login(t, s, "NOSUCHSESSION", "alice", "secret")
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "Invalid session.") {
+		t.Errorf("expected 'Invalid session.' error, got: %s", body)
+	}
+	if strings.Contains(string(body), "NOSUCHSESSION") {
+		t.Errorf("error page must not echo the session identifier, got: %s", body)
+	}
+}
+
+func TestOldConnectionsArePurgedOnNewAuth(t *testing.T) {
 	s := newTestServer(t)
 	staleSession := startAuth(t, s, "openid")
 
 	s.Lock()
 	conn := s.connections[staleSession]
-	conn.created = time.Now().Add(-connectionTTL - time.Minute)
+	conn.created = time.Now().Add(-connectionRetention - time.Minute)
 	s.connections[staleSession] = conn
 	s.Unlock()
 
-	// Starting a new authentication flow should sweep out the stale one.
+	// Starting a new authentication flow should sweep out the old one.
 	startAuth(t, s, "openid")
 
 	s.Lock()
 	_, stillThere := s.connections[staleSession]
 	s.Unlock()
 	if stillThere {
-		t.Error("expired connection was not purged when a new one was created")
+		t.Error("connection older than connectionRetention was not purged when a new one was created")
 	}
 }
 

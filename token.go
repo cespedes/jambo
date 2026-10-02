@@ -96,20 +96,32 @@ func (s *Server) tokenAuthorizationCode(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Clients only ever see invalid_grant (RFC 6749 section 5.2) however
+	// the code is unusable; the real reason is only logged in debug mode.
+	reason := "unknown code"
 	s.Lock()
 	conn, ok := s.connections[code]
 	if ok {
-		// An authorization code MUST NOT be used more than once (RFC 6749, section 4.1.2).
-		delete(s.connections, code)
-		if conn.expired() {
+		if !conn.usable() {
 			ok = false
+			reason = "expired code"
+			if conn.used {
+				reason = "code already used"
+			}
+		} else {
+			// An authorization code MUST NOT be used more than once (RFC 6749,
+			// section 4.1.2). The connection is kept, marked as used, rather
+			// than deleted (see connectionRetention).
+			used := conn
+			used.used = true
+			s.connections[code] = used
 		}
 	}
 	s.Unlock()
 
 	if !ok {
 		if s.debug {
-			log.Printf("%s POST /token: invalid code=%q\n", r.RemoteAddr, code)
+			log.Printf("%s POST /token: invalid code=%q: %s\n", r.RemoteAddr, code, reason)
 		}
 		fmt.Fprintln(w, `{"error":"invalid_grant","error_description":"Invalid or expired code parameter."}`)
 		return

@@ -97,7 +97,7 @@ func (s *Server) openIDAuth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.Lock()
-	s.purgeExpiredConnections()
+	s.purgeOldConnections()
 	s.connections[conn.code] = conn
 	s.Unlock()
 
@@ -124,16 +124,23 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 
 	s.Lock()
 	conn, ok := s.connections[session]
-	if ok && conn.expired() {
-		delete(s.connections, session)
-		ok = false
-	}
 	s.Unlock()
 
-	if !ok {
+	// Tell the user why the session can't be used, since the usual causes
+	// (a tab left open too long, or a form resubmitted after going back)
+	// have a different remedy than a made-up session. The session
+	// identifier is a long random value, so none of this helps guessing one.
+	if !ok || !conn.usable() {
+		msg := "Invalid session."
+		switch {
+		case ok && conn.used:
+			msg = "This login was already completed. Please go back to the application and start again."
+		case ok:
+			msg = "Your login session has expired. Please go back to the application and start again."
+		}
 		s.template(w, r, "error.html", map[string]string{
 			"errorType": "Bad request",
-			"error":     fmt.Sprintf(`Invalid session %q from request`, session),
+			"error":     msg,
 		})
 		return
 	}
@@ -153,8 +160,14 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 
 	conn.response = resp
 
+	// Store the authenticator's response, unless the connection was
+	// redeemed meanwhile: writing back our stale copy would make its code
+	// usable again.
 	s.Lock()
-	s.connections[session] = conn
+	if cur, ok := s.connections[session]; ok && !cur.used {
+		cur.response = resp
+		s.connections[session] = cur
+	}
 	s.Unlock()
 
 	switch resp.Type {

@@ -25,10 +25,18 @@ import (
 )
 
 // connectionTTL is how long a pending connection (an in-progress
-// authentication, identified by its code) is kept around before being
-// considered expired and purged. This bounds the memory used by
-// abandoned logins and by codes nobody ever redeemed.
+// authentication, identified by its code) can still be used before it is
+// considered expired.
 const connectionTTL = 10 * time.Minute
+
+// connectionRetention is how long a connection is kept in memory, counted
+// from its creation, whether it has expired by time or been used (redeemed
+// at /token). Keeping them after they stop being usable lets a host's
+// templates and handlers still look up which client a session belonged to
+// -- e.g. to render an error page for a code that was already used. Purging
+// them eventually bounds the memory taken by abandoned logins and by codes
+// nobody ever redeemed.
+const connectionRetention = 24 * time.Hour
 
 //go:embed web/static
 var _webStatic embed.FS
@@ -63,6 +71,7 @@ type Client struct {
 type Connection struct {
 	code        string
 	created     time.Time // used to expire stale, unredeemed connections
+	used        bool      // the code has been redeemed at /token; it can't be used again
 	client      *Client
 	redirectURI string
 	state       string
@@ -76,16 +85,18 @@ type Connection struct {
 	codeChallengeMethod string
 }
 
-// expired reports whether conn is older than connectionTTL.
-func (conn Connection) expired() bool {
-	return time.Since(conn.created) > connectionTTL
+// usable reports whether conn can still be used: it has not been redeemed
+// yet and is not older than connectionTTL. Connections that are no longer
+// usable stay in s.connections until connectionRetention has passed.
+func (conn Connection) usable() bool {
+	return !conn.used && time.Since(conn.created) <= connectionTTL
 }
 
-// purgeExpiredConnections removes connections older than connectionTTL.
-// Callers must hold s.Mutex.
-func (s *Server) purgeExpiredConnections() {
+// purgeOldConnections removes connections older than
+// connectionRetention. Callers must hold s.Mutex.
+func (s *Server) purgeOldConnections() {
 	for code, conn := range s.connections {
-		if conn.expired() {
+		if time.Since(conn.created) > connectionRetention {
 			delete(s.connections, code)
 		}
 	}
