@@ -12,7 +12,10 @@
   <div class="jambo">
     <div class="logos">
       <a href="https://github.com/cespedes/jambo"><img class="logo" alt="Jambo" src="{{ .root }}/img/jambo.png"></a>
+{{- /* Example, not enabled: a logo for each client, served from the host's own
+       web/static/img/logo-<client id>.png (no such file is included in jambo itself).
+       Inside "with", "." is the client, so the root is reached as "$.root". */}}
 {{- with .client }}
-      <!-- img class="logo" src="{{ printf "/img/logo-%s.png" . }}" -->
+      <!-- img class="logo" alt="{{ . }}" src="{{ printf "%s/img/logo-%s.png" $.root . }}" -->
 {{- end }}
     </div>
