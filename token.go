@@ -41,7 +41,7 @@ func (s *Server) openIDToken(w http.ResponseWriter, r *http.Request) {
 	case "refresh_token":
 		s.tokenRefreshToken(w, r)
 	default:
-		if s.debug {
+		if s.debug.Load() {
 			log.Printf("%s POST /token: unsupported grant_type %q\n", r.RemoteAddr, r.PostFormValue("grant_type"))
 		}
 		fmt.Fprintln(w, `{"error":"unsupported_grant_type"}`)
@@ -79,7 +79,7 @@ func (s *Server) authenticateClient(r *http.Request) (*Client, error) {
 func (s *Server) tokenAuthorizationCode(w http.ResponseWriter, r *http.Request) {
 	code := r.PostFormValue("code")
 	if code == "" {
-		if s.debug {
+		if s.debug.Load() {
 			log.Printf("%s POST /token: empty code\n", r.RemoteAddr)
 		}
 		fmt.Fprintln(w, `{"error":"invalid_request","error_description":"Required param: code."}`)
@@ -89,7 +89,7 @@ func (s *Server) tokenAuthorizationCode(w http.ResponseWriter, r *http.Request) 
 
 	client, err := s.authenticateClient(r)
 	if err != nil {
-		if s.debug {
+		if s.debug.Load() {
 			log.Printf("%s POST /token: %v\n", r.RemoteAddr, err)
 		}
 		fmt.Fprintln(w, `{"error":"invalid_client","error_description":"Invalid client credentials."}`)
@@ -120,7 +120,7 @@ func (s *Server) tokenAuthorizationCode(w http.ResponseWriter, r *http.Request) 
 	s.Unlock()
 
 	if !ok {
-		if s.debug {
+		if s.debug.Load() {
 			log.Printf("%s POST /token: invalid code=%q: %s\n", r.RemoteAddr, code, reason)
 		}
 		fmt.Fprintln(w, `{"error":"invalid_grant","error_description":"Invalid or expired code parameter."}`)
@@ -132,7 +132,7 @@ func (s *Server) tokenAuthorizationCode(w http.ResponseWriter, r *http.Request) 
 	// client could redeem a code that leaked from a completely different
 	// client's flow (e.g. via a referrer leak) using its own credentials.
 	if conn.client.id != client.id {
-		if s.debug {
+		if s.debug.Load() {
 			log.Printf("%s POST /token: code was issued to client %q, not %q\n", r.RemoteAddr, conn.client.id, client.id)
 		}
 		fmt.Fprintln(w, `{"error":"invalid_grant","error_description":"Authorization code was not issued to this client."}`)
@@ -140,7 +140,7 @@ func (s *Server) tokenAuthorizationCode(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if redirectURI != conn.redirectURI {
-		if s.debug {
+		if s.debug.Load() {
 			log.Printf("%s POST /token: invalid redirect_uri=%q\n", r.RemoteAddr, redirectURI)
 		}
 		fmt.Fprintln(w, `{"error":"invalid_request","error_description":"redirect_uri did not match URI from initial request."}`)
@@ -152,7 +152,7 @@ func (s *Server) tokenAuthorizationCode(w http.ResponseWriter, r *http.Request) 
 	if conn.codeChallenge != "" {
 		codeVerifier := r.PostFormValue("code_verifier")
 		if !validPKCEVerifier(conn.codeChallengeMethod, conn.codeChallenge, codeVerifier) {
-			if s.debug {
+			if s.debug.Load() {
 				log.Printf("%s POST /token: invalid code_verifier\n", r.RemoteAddr)
 			}
 			fmt.Fprintln(w, `{"error":"invalid_grant","error_description":"Invalid or missing code_verifier."}`)
@@ -346,7 +346,7 @@ func (s *Server) verifySignedToken(token string) ([]byte, error) {
 func (s *Server) tokenRefreshToken(w http.ResponseWriter, r *http.Request) {
 	client, err := s.authenticateClient(r)
 	if err != nil {
-		if s.debug {
+		if s.debug.Load() {
 			log.Printf("%s POST /token: %v\n", r.RemoteAddr, err)
 		}
 		fmt.Fprintln(w, `{"error":"invalid_client","error_description":"Invalid client credentials."}`)
@@ -365,7 +365,7 @@ func (s *Server) tokenRefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok || rt.ClientID != client.id {
-		if s.debug {
+		if s.debug.Load() {
 			log.Printf("%s POST /token: invalid refresh_token\n", r.RemoteAddr)
 		}
 		fmt.Fprintln(w, `{"error":"invalid_grant","error_description":"Invalid refresh token."}`)

@@ -211,7 +211,7 @@ func (s *Server) ssfCreateStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.debug {
+	if s.debug.Load() {
 		log.Printf("SSF: created stream %s for client %s (delivery=%s, events_requested=%v, events_delivered=%v)\n",
 			stream.StreamID, client.id, stream.Delivery.Method, stream.EventsRequested, stream.EventsDelivered)
 	}
@@ -220,7 +220,7 @@ func (s *Server) ssfCreateStream(w http.ResponseWriter, r *http.Request) {
 	// waiting for the receiver to call /ssf/verify: this is what a real
 	// receiver (observed: Apple Business Manager) actually waits on to
 	// consider the stream successfully set up, per authentik's transmitter.
-	if err := s.deliverEvent(stream, eventSSFVerification, Subject{Format: SubjectFormatOpaque, ID: stream.StreamID}, nil); err != nil && s.debug {
+	if err := s.deliverEvent(stream, eventSSFVerification, Subject{Format: SubjectFormatOpaque, ID: stream.StreamID}, nil); err != nil && s.debug.Load() {
 		log.Printf("SSF: failed to send initial verification event for stream %s: %v\n", stream.StreamID, err)
 	}
 	s.writeStreamJSON(w, http.StatusCreated, stream)

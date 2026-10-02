@@ -3,7 +3,6 @@ package jambo
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 )
@@ -72,7 +71,8 @@ func (s *Server) openIDConfiguration(w http.ResponseWriter, r *http.Request) {
 
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
-		log.Fatal(err)
+		http.Error(w, "Internal server error marshaling OpenID configuration.", http.StatusInternalServerError)
+		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)+1))

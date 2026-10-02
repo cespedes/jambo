@@ -212,7 +212,7 @@ func (s *Server) requireSSFScope(r *http.Request, anyOf ...string) (clientID str
 }
 
 func (s *Server) ssfError(w http.ResponseWriter, status int, err error) {
-	if s.debug {
+	if s.debug.Load() {
 		log.Printf("SSF: status=%d error=%v\n", status, err)
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -230,7 +230,7 @@ func (s *Server) decodeSSFJSON(r *http.Request, v any) error {
 	if err != nil {
 		return fmt.Errorf("reading request body: %w", err)
 	}
-	if s.debug {
+	if s.debug.Load() {
 		log.Printf("%s %s %s: body = %s\n", r.RemoteAddr, r.Method, r.URL, body)
 	}
 	if len(body) == 0 {
@@ -244,7 +244,7 @@ func (s *Server) decodeSSFJSON(r *http.Request, v any) error {
 // response has already started, so there's nothing left to do about it
 // besides note it happened.
 func (s *Server) encodeSSFJSON(w http.ResponseWriter, v any) {
-	if err := json.NewEncoder(w).Encode(v); err != nil && s.debug {
+	if err := json.NewEncoder(w).Encode(v); err != nil && s.debug.Load() {
 		log.Printf("SSF: encoding JSON response: %v\n", err)
 	}
 }

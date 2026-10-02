@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cespedes/jambo/mergefs"
@@ -123,7 +124,7 @@ type Server struct {
 	key     jose.JSONWebKey
 	allKeys jose.JSONWebKeySet
 
-	debug bool // set via SetDebug; logs extra diagnostics when true
+	debug atomic.Bool // set via SetDebug; logs extra diagnostics when true
 
 	storage              Storage // set via SetStorage; defaults to an in-memory Storage
 	allowInsecureSSFPush bool    // set via SetSSFAllowPrivatePush; disables the SSRF guard on SSF push endpoint_url
@@ -135,9 +136,10 @@ type Server struct {
 
 // SetDebug enables or disables extra diagnostic logging, such as
 // incoming requests and the reasons behind auth/token errors. It can
-// be called at any time and takes effect on the next log line.
+// be called at any time, even while the Server is serving requests, and
+// takes effect on the next log line.
 func (s *Server) SetDebug(enabled bool) {
-	s.debug = enabled
+	s.debug.Store(enabled)
 }
 
 // SetStorage installs the Storage used to persist refresh tokens and SSF
@@ -214,7 +216,7 @@ func NewServer(issuer, root string) *Server {
 	}
 
 	s.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.debug {
+		if s.debug.Load() {
 			log.Printf("%s %s %s\n", r.RemoteAddr, r.Method, r.URL)
 		}
 		s.mux.ServeHTTP(w, r)
@@ -466,18 +468,18 @@ func (s *Server) RemoveClient(id string) bool {
 		return false
 	}
 
-	if err := s.storage.DeleteRefreshTokensForClient(id); err != nil && s.debug {
+	if err := s.storage.DeleteRefreshTokensForClient(id); err != nil && s.debug.Load() {
 		log.Printf("RemoveClient(%q): deleting refresh tokens: %v\n", id, err)
 	}
 	streams, err := s.storage.ListStreams(id)
 	if err != nil {
-		if s.debug {
+		if s.debug.Load() {
 			log.Printf("RemoveClient(%q): listing SSF streams: %v\n", id, err)
 		}
 		return true
 	}
 	for _, stream := range streams {
-		if err := s.storage.DeleteStream(stream.StreamID); err != nil && s.debug {
+		if err := s.storage.DeleteStream(stream.StreamID); err != nil && s.debug.Load() {
 			log.Printf("RemoveClient(%q): deleting SSF stream %s: %v\n", id, stream.StreamID, err)
 		}
 	}

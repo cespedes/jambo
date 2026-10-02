@@ -2,9 +2,12 @@ package jambo
 
 import (
 	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -192,6 +195,43 @@ func TestNewClientConcurrentWithAuth(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/oidc/auth?"+q.Encode(), nil)
 			rec := httptest.NewRecorder()
 			s.ServeHTTP(rec, req)
+		}
+	}()
+
+	wg.Wait()
+}
+
+// TestSetDebugConcurrentWithRequests toggles SetDebug while requests, which
+// read the debug setting to decide whether to log, are being served. Like
+// the other concurrency tests, its purpose is to give `go test -race` a
+// real chance to catch a data race if one exists.
+func TestSetDebugConcurrentWithRequests(t *testing.T) {
+	s := newTestServer(t)
+	log.SetOutput(io.Discard)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := range 200 {
+			s.SetDebug(i%2 == 0)
+		}
+		close(done)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			req := httptest.NewRequest(http.MethodGet, "/oidc/auth?client_id=test-client", nil)
+			s.ServeHTTP(httptest.NewRecorder(), req)
 		}
 	}()
 

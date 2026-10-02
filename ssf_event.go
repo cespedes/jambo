@@ -137,14 +137,14 @@ func (s *Server) pushEvent(stream Stream, setJWS string) {
 		const maxAttempts = 8
 		for attempt := 1; attempt <= maxAttempts; attempt++ {
 			if err := isSafePushURL(stream.Delivery.EndpointURL, s.allowInsecureSSFPush); err != nil {
-				if s.debug {
+				if s.debug.Load() {
 					log.Printf("SSF push to stream %s: endpoint_url no longer safe: %v\n", stream.StreamID, err)
 				}
 				return
 			}
 			req, err := http.NewRequest(http.MethodPost, stream.Delivery.EndpointURL, strings.NewReader(setJWS))
 			if err != nil {
-				if s.debug {
+				if s.debug.Load() {
 					log.Printf("SSF push to stream %s: %v\n", stream.StreamID, err)
 				}
 				return
@@ -159,10 +159,10 @@ func (s *Server) pushEvent(stream Stream, setJWS string) {
 				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 					return
 				}
-				if s.debug {
+				if s.debug.Load() {
 					log.Printf("SSF push to stream %s: status %d (attempt %d/%d)\n", stream.StreamID, resp.StatusCode, attempt, maxAttempts)
 				}
-			} else if s.debug {
+			} else if s.debug.Load() {
 				log.Printf("SSF push to stream %s: %v (attempt %d/%d)\n", stream.StreamID, err, attempt, maxAttempts)
 			}
 			if attempt < maxAttempts {
@@ -170,7 +170,7 @@ func (s *Server) pushEvent(stream Stream, setJWS string) {
 				backoff *= 2
 			}
 		}
-		if s.debug {
+		if s.debug.Load() {
 			log.Printf("SSF push to stream %s: giving up after %d attempts\n", stream.StreamID, maxAttempts)
 		}
 	}()
