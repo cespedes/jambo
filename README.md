@@ -1,6 +1,6 @@
 # jambo
 
-jambo is an Go package to build an OpenID Connect provider (OIDC server).
+jambo is a Go package to build an OpenID Connect provider (OIDC server).
 
 "Jambo" is also a Swahili word.  It translates to "hello" or "hi".
 It's a common greeting used in East Africa, particularly
@@ -77,7 +77,7 @@ The OpenID Connect specification is here:
 
 # Workflow
 
-We will assume Alice (client) wants to connect to a GitLab instance (client),
+We will assume Alice (a user) wants to connect to a GitLab instance (a client),
 which is configured to authenticate using Jambo, our OpenID Connect provider.
 
 - Alice opens a web browser and goes to GitLab page (https://gitlab.example.com).
@@ -91,14 +91,32 @@ which is configured to authenticate using Jambo, our OpenID Connect provider.
 - Jambo receives the request, checks if it comes from an active session, and calls the
   Authenticator function with all the parameters received from the form.
 - The Authentication function checks the parameters and returns a "Login OK".
-- Jambo optionally redirects to an approval HTML template, with a summary and a way to
-  continue to the client (GitLab).
-- When Alice clicks "OK", Jambo redirects to the GitLab's "callback address"
+- Optionally, the Authenticator can ask for another step (for example a one-time
+  code) by returning `ResponseTypeRedirect` with the name of an HTML template to show,
+  and the flow goes back to the previous step when that form is submitted.
+- Once the login is OK, Jambo redirects Alice to GitLab's "callback address"
 - GitLab receives the request with a "code"
 - GitLab connects to Jambo in background, sending the "code" and the "client secret".
-- Jambo replies with an _access token_ which contains a BASE64 signed JSON object with the
-  claims (login, name, e-mail...) depending on the requested scopes.
+- Jambo replies with an _access token_ (also sent as _id token_): a signed JWT (JWS)
+  whose claims (login, name, e-mail...) depend on the requested scopes.
 - GitLab receives the response and sends Alice the GitLab page, already authenticated.
+
+# Login sessions
+
+Each `/auth` request creates a session (identified by a random value that is
+also the authorization `code`), kept in memory only:
+
+- It can be used for 10 minutes. The code is single-use: once it has been redeemed
+  at `/token`, it can't be used again.
+- Sessions that have expired or been used are not deleted right away: they are kept
+  for 24 hours after being created, so that an HTML template can still tell which
+  client they belonged to (the `client` template value is set from
+  [`Server.GetConnection`](server.go) in `/auth` and in `/auth/login`).
+- If a login form is submitted for a session that has been used, has expired or is
+  unknown, `/auth/login` renders `error.html` with a message telling which of the
+  three it is (without repeating the session identifier). `/token` always answers
+  `invalid_grant` in all those cases, as RFC 6749 requires; with `SetDebug(true)`
+  it logs the real reason.
 
 # Reconfiguring a Server at runtime
 
