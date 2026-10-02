@@ -6,7 +6,7 @@
       <form method="post" action="{{ .postURL }}">
         <div class="form-row">
           <div class="form-label">
-            <label for="userid">{{ $LoginPrompt }}</label>
+            <label for="login">{{ $LoginPrompt }}</label>
           </div>
           <input type="hidden" name="session" value="{{ .session }}">
           <input tabindex="1" required id="login" name="login" type="text" class="form-input" placeholder="{{ $LoginPrompt }}" {{ if .login }} value="{{ .login }}" {{ else }} autofocus {{ end }}/>
@@ -20,7 +20,7 @@
 
         {{ if .loginFailed }}
           <div id="login-error" class="error-box">
-            Invalid {{ $LoginPrompt }} and password.
+            {{ if .error }}{{ .error }}{{ else }}Invalid {{ $LoginPrompt }} and password.{{ end }}
           </div>
         {{ end }}
 

@@ -279,8 +279,9 @@ func (s *Server) ssfUpdateStream(w http.ResponseWriter, r *http.Request) {
 	s.ssfModifyStream(w, r, false)
 }
 
-// ssfReplaceStream handles "PUT /ssf/stream": events_requested and
-// delivery are required and fully replace the existing configuration.
+// ssfReplaceStream handles "PUT /ssf/stream": a valid delivery is
+// required, and every field of the request replaces the stream's current
+// value, so any field it omits is cleared.
 func (s *Server) ssfReplaceStream(w http.ResponseWriter, r *http.Request) {
 	s.ssfModifyStream(w, r, true)
 }

@@ -164,8 +164,6 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 
 	resp := s.authenticator(&req)
 
-	conn.response = resp
-
 	// Store the authenticator's response, unless the connection was
 	// redeemed meanwhile: writing back our stale copy would make its code
 	// usable again.

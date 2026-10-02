@@ -228,6 +228,20 @@ func TestLoginFailedReRendersForm(t *testing.T) {
 	}
 }
 
+func TestLoginFailedShowsAuthenticatorError(t *testing.T) {
+	s := newTestServer(t)
+	s.SetAuthenticator(func(req *Request) Response {
+		return Response{Type: ResponseTypeLoginFailed, Error: "Account locked."}
+	})
+	session := startAuth(t, s, "openid")
+
+	resp := login(t, s, session, "alice", "secret")
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "Account locked.") {
+		t.Errorf("login form doesn't show the authenticator's error, got: %s", body)
+	}
+}
+
 func TestUnknownClientIsRejected(t *testing.T) {
 	s := newTestServer(t)
 	q := url.Values{

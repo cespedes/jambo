@@ -188,7 +188,7 @@ func (s *Server) tokenAuthorizationCode(w http.ResponseWriter, r *http.Request) 
 
 	data, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
-		http.Error(w, "Internal server error marshaling keys.", http.StatusInternalServerError)
+		http.Error(w, "Internal server error marshaling token response.", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

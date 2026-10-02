@@ -64,13 +64,14 @@ type Client struct {
 	ssfEventsSupported  []string // Shared Signals Framework event type URIs this client's streams may receive
 }
 
-// Connection holds the state of one pending login flow: a /auth request
-// that hasn't yet been completed by /auth/login or redeemed at /token.
-// It has no exported fields or methods; a host application only ever
-// passes one it got from [Server.GetConnection] to [Server.SetConnection].
+// Connection holds the state of one login flow, from the /auth request
+// that started it until it is redeemed at /token, expires, or is purged
+// (see connectionTTL and connectionRetention). It has no exported fields
+// or methods; a host application only ever passes one it got from
+// [Server.GetConnection] to [Server.SetConnection].
 type Connection struct {
 	code        string
-	created     time.Time // used to expire stale, unredeemed connections
+	created     time.Time // used to expire unredeemed connections (connectionTTL) and to purge old ones (connectionRetention)
 	used        bool      // the code has been redeemed at /token; it can't be used again
 	client      *Client
 	redirectURI string
