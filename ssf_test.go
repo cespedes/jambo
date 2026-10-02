@@ -324,6 +324,53 @@ func TestSSFAcceptsRealWorldReceiverPayload(t *testing.T) {
 	}
 }
 
+// TestSSFReplaceKeepsAudienceWhenOmitted guards against PUT /ssf/stream
+// clearing the stream's "aud" when the request doesn't include one, which
+// would leave every SET signed afterwards without an audience.
+func TestSSFReplaceKeepsAudienceWhenOmitted(t *testing.T) {
+	s := newSSFTestServer(t)
+	body := ssfExchangeCode(t, s, "openid ssf.manage ssf.read")
+	accessToken, _ := body["access_token"].(string)
+
+	receiverAud := "https://receiver.example.com/feed/1"
+	status, streamResp := ssfDo(t, s, http.MethodPost, "/ssf/stream", accessToken, map[string]any{
+		"aud":              []string{receiverAud},
+		"delivery":         map[string]any{"method": deliveryMethodPoll},
+		"events_requested": []string{EventCAEPSessionRevoked},
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("POST /ssf/stream: status = %d, body = %v", status, streamResp)
+	}
+	streamID, _ := streamResp["stream_id"].(string)
+
+	put := func(extra map[string]any) map[string]any {
+		t.Helper()
+		req := map[string]any{
+			"stream_id":        streamID,
+			"delivery":         map[string]any{"method": deliveryMethodPoll},
+			"events_requested": []string{EventCAEPSessionRevoked},
+		}
+		for k, v := range extra {
+			req[k] = v
+		}
+		status, resp := ssfDo(t, s, http.MethodPut, "/ssf/stream", accessToken, req)
+		if status != http.StatusOK {
+			t.Fatalf("PUT /ssf/stream: status = %d, body = %v", status, resp)
+		}
+		return resp
+	}
+
+	resp := put(nil)
+	if aud, _ := resp["aud"].([]any); len(aud) != 1 || aud[0] != receiverAud {
+		t.Errorf("PUT without aud: aud = %v, want [%s]", aud, receiverAud)
+	}
+
+	resp = put(map[string]any{"aud": []string{"https://receiver.example.com/feed/2"}})
+	if aud, _ := resp["aud"].([]any); len(aud) != 1 || aud[0] != "https://receiver.example.com/feed/2" {
+		t.Errorf("PUT with aud: aud = %v, want the new one", aud)
+	}
+}
+
 // TestSSFDeleteAcceptsStreamIDInBody guards against a regression where a
 // receiver (observed: Apple Business Manager) sends stream_id in a JSON
 // body on DELETE /ssf/stream instead of as a ?stream_id= query parameter.

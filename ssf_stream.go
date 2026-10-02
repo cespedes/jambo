@@ -281,7 +281,8 @@ func (s *Server) ssfUpdateStream(w http.ResponseWriter, r *http.Request) {
 
 // ssfReplaceStream handles "PUT /ssf/stream": a valid delivery is
 // required, and every field of the request replaces the stream's current
-// value, so any field it omits is cleared.
+// value, so any field it omits is cleared -- except "aud", which keeps its
+// current value if omitted.
 func (s *Server) ssfReplaceStream(w http.ResponseWriter, r *http.Request) {
 	s.ssfModifyStream(w, r, true)
 }
@@ -326,7 +327,9 @@ func (s *Server) ssfModifyStream(w http.ResponseWriter, r *http.Request, replace
 			stream.Delivery.EndpointURL = s.issuer + "/ssf/poll/" + stream.StreamID
 		}
 	}
-	if replace || len(req.Aud) > 0 {
+	// An omitted "aud" is never cleared, not even by PUT: a stream without
+	// an audience would make every SET signed for it invalid.
+	if len(req.Aud) > 0 {
 		stream.Aud = req.Aud
 	}
 	if replace || req.EventsRequested != nil {
