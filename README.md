@@ -165,6 +165,22 @@ serving live traffic. `staticFS`/`templatesFS` may be `nil` to mean "just
 the embedded defaults, no override." Client configuration is untouched --
 combine it with `NewClient`/`RemoveClient` above for a full reload.
 
+## Template values for one client
+
+Besides the values given to `ReplacePresentation`, which every template
+receives, each client can have values of its own, available to the templates
+rendered during its logins:
+
+```go
+client.AddTemplateArgs(map[string]string{"url": "https://gitlab.example.com/"})
+```
+
+In the template this is just `{{ .url }}`. Values from a client replace the
+Server-wide ones with the same name, and the values Jambo itself passes
+(`client`, which is the client's id, and, depending on the page, `session`,
+`postURL`, `error`...) take precedence over both. Like the rest of a client's
+configuration, they start empty again when `NewClient` replaces the client.
+
 # Shared Signals Framework (SSF)
 
 Jambo can also act as an SSF transmitter (OpenID Shared Signals Framework

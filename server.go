@@ -52,7 +52,7 @@ type Client struct {
 	id     string
 	secret string
 
-	// configMu guards the four fields below. It exists because a Client
+	// configMu guards the fields below. It exists because a Client
 	// returned by NewClient is already reachable through s.clients -- and
 	// so through a live request -- before the caller finishes calling
 	// AddAllowed*/AddSSFEventsSupported on it (see NewClient's doc
@@ -60,9 +60,10 @@ type Client struct {
 	// allowedScopes to validate a concurrent /auth request.
 	configMu            sync.RWMutex
 	allowedRedirectURIs []string
-	allowedScopes       []string // allowed extra scopes
-	allowedRoles        []string // if empty, any user is allowed
-	ssfEventsSupported  []string // Shared Signals Framework event type URIs this client's streams may receive
+	allowedScopes       []string          // allowed extra scopes
+	allowedRoles        []string          // if empty, any user is allowed
+	ssfEventsSupported  []string          // Shared Signals Framework event type URIs this client's streams may receive
+	templateArgs        map[string]string // extra values for the HTML templates rendered for this client
 }
 
 // Connection holds the state of one login flow, from the /auth request
@@ -526,6 +527,30 @@ func (c *Client) AddAllowedRoles(names ...string) {
 	c.configMu.Lock()
 	defer c.configMu.Unlock()
 	c.allowedRoles = append(c.allowedRoles, names...)
+}
+
+// AddTemplateArgs adds values that the HTML templates rendered for c's
+// logins receive in addition to the Server-wide ones (see
+// [Server.ReplacePresentation]); a key set here replaces the Server-wide
+// value of the same name. The values a handler passes itself (e.g. "session"
+// or "postURL") and "client" (c's id) always take precedence over these.
+// They are only available while a template is rendered with c's Connection
+// at hand (see [Server.SetConnection]), as /auth and /auth/login do.
+func (c *Client) AddTemplateArgs(args map[string]string) {
+	c.configMu.Lock()
+	defer c.configMu.Unlock()
+	if c.templateArgs == nil {
+		c.templateArgs = make(map[string]string, len(args))
+	}
+	maps.Copy(c.templateArgs, args)
+}
+
+// templateArgsSnapshot returns a copy of c's template args, safe to keep
+// and use after this call returns even if c's configuration changes later.
+func (c *Client) templateArgsSnapshot() map[string]string {
+	c.configMu.RLock()
+	defer c.configMu.RUnlock()
+	return maps.Clone(c.templateArgs)
 }
 
 // allowedRolesSnapshot returns a copy of c's allowed roles, safe to keep

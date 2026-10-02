@@ -173,6 +173,7 @@ func TestNewClientConcurrentWithAuth(t *testing.T) {
 			c.AddAllowedRedirectURIs("http://client.example.com/callback")
 			c.AddAllowedScopes("token")
 			c.AddAllowedRoles("staff")
+			c.AddTemplateArgs(map[string]string{"url": "https://app.example.com/"})
 		}
 		close(done)
 	}()

@@ -21,9 +21,13 @@ func (s *Server) template(w http.ResponseWriter, r *http.Request, name string, d
 		"issuer": s.issuer,
 	}
 	maps.Copy(dest, templateArgs)
-	maps.Copy(dest, data)
 
-	if conn := s.GetConnection(r); conn != nil && conn.client != nil {
+	conn := s.GetConnection(r)
+	if conn != nil && conn.client != nil {
+		maps.Copy(dest, conn.client.templateArgsSnapshot())
+	}
+	maps.Copy(dest, data)
+	if conn != nil && conn.client != nil {
 		dest["client"] = conn.client.id
 	}
 

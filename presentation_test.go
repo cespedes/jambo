@@ -1,6 +1,7 @@
 package jambo
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -169,4 +170,68 @@ func TestReplacePresentationConcurrentWithRequests(t *testing.T) {
 	}()
 
 	wg.Wait()
+}
+
+func TestClientTemplateArgs(t *testing.T) {
+	s := newTestServer(t)
+	other := s.NewClient("other-client", "other-secret")
+	other.AddAllowedRedirectURIs("http://other.example.com/callback")
+	other.AddTemplateArgs(map[string]string{"url": "https://other.example.com/"})
+	s.clientByID("test-client").AddTemplateArgs(map[string]string{
+		"url":    "https://app.example.com/",
+		"shared": "from-client",
+		"client": "ignored",
+	})
+
+	templatesFS := fstest.MapFS{
+		"login.html": &fstest.MapFile{Data: []byte(
+			`<input name="session" value="{{ .session }}">client={{ .client }} url={{ .url }} shared={{ .shared }}`,
+		)},
+		"error.html": &fstest.MapFile{Data: []byte(`error client={{ .client }} url={{ .url }}`)},
+	}
+	if err := s.ReplacePresentation(nil, templatesFS, map[string]string{"shared": "global", "session": "overridden"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Each client sees its own values, which win over the Server-wide ones;
+	// "client" always is the client's id, and the handler's own values (here,
+	// "session") win over both.
+	body := getAuthPageBody(t, s)
+	for _, want := range []string{"client=test-client", "url=https://app.example.com/", "shared=from-client"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("login page of test-client missing %q, got: %s", want, body)
+		}
+	}
+	if strings.Contains(body, `value="overridden"`) {
+		t.Errorf("a Server-wide arg overrode the handler's own session value, got: %s", body)
+	}
+
+	q := url.Values{
+		"client_id":     {"other-client"},
+		"redirect_uri":  {"http://other.example.com/callback"},
+		"response_type": {"code"},
+		"scope":         {"openid"},
+	}
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/oidc/auth?"+q.Encode(), nil))
+	if body := rec.Body.String(); !strings.Contains(body, "client=other-client url=https://other.example.com/ shared=global") {
+		t.Errorf("login page of other-client has the wrong values, got: %s", body)
+	}
+
+	// The error page of a used session still knows the client's values.
+	session := sessionRe.FindStringSubmatch(body)[1]
+	resp := login(t, s, session, "alice", "secret")
+	loc, _ := url.Parse(resp.Header.Get("Location"))
+	exchangeCode(t, s, loc.Query().Get("code"))
+	resp = login(t, s, session, "alice", "secret")
+	errBody, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(errBody), "error client=test-client url=https://app.example.com/") {
+		t.Errorf("error page of a used session lost the client's values, got: %s", errBody)
+	}
+
+	// Re-registering the client starts it from scratch: its old args don't carry over.
+	s.NewClient("test-client", "test-secret").AddAllowedRedirectURIs("http://client.example.com/callback")
+	if body := getAuthPageBody(t, s); strings.Contains(body, "app.example.com") {
+		t.Errorf("template args survived NewClient, got: %s", body)
+	}
 }
